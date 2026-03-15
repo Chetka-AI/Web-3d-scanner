@@ -93,6 +93,10 @@
     btnFlip.addEventListener('click', flipCamera);
     btnStopCamera.addEventListener('click', stopCamera);
 
+    // File upload fallback
+    $('btnLoadFiles').addEventListener('click', () => $('fileInput').click());
+    $('fileInput').addEventListener('change', handleFileUpload);
+
     // Gallery tab
     btnClearGallery.addEventListener('click', clearGallery);
     btnProcess.addEventListener('click', startProcessing);
@@ -106,6 +110,8 @@
     // Viewer tab
     btnResetView.addEventListener('click', () => ViewerModule.resetView());
     btnToggleMode.addEventListener('click', toggleViewerMode);
+    $('btnPointSizeUp').addEventListener('click', () => ViewerModule.adjustPointSize(1.4));
+    $('btnPointSizeDown').addEventListener('click', () => ViewerModule.adjustPointSize(0.7));
     btnExportOBJ.addEventListener('click', exportOBJ);
     btnExportPLY.addEventListener('click', exportPLY);
     btnNewScan.addEventListener('click', newScan);
@@ -234,6 +240,69 @@
       clearInterval(orientationInterval);
       orientationInterval = null;
     }
+  }
+
+  async function handleFileUpload(e) {
+    const files = Array.from(e.target.files);
+    if (!files.length) return;
+
+    toast(`Wczytywanie ${files.length} zdjęć...`, 'info');
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const dataUrl = await readFileAsDataUrl(file);
+      const img = await loadImageEl(dataUrl);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const fullDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+      const thumbCanvas = document.createElement('canvas');
+      thumbCanvas.width = 128;
+      thumbCanvas.height = 128;
+      const tCtx = thumbCanvas.getContext('2d');
+      const size = Math.min(img.width, img.height);
+      const sx = (img.width - size) / 2;
+      const sy = (img.height - size) / 2;
+      tCtx.drawImage(canvas, sx, sy, size, size, 0, 0, 128, 128);
+      const thumbUrl = thumbCanvas.toDataURL('image/jpeg', 0.7);
+
+      const angle = (i / files.length) * 360;
+      const photo = {
+        id: Date.now() + '-file-' + i,
+        dataUrl: fullDataUrl,
+        thumbUrl,
+        width: img.width,
+        height: img.height,
+        orientation: { alpha: angle, beta: 0, gamma: 0 },
+        timestamp: Date.now(),
+      };
+      CameraModule.getPhotos().push(photo);
+    }
+
+    updateGalleryBadge();
+    toast(`Wczytano ${files.length} zdjęć — przejdź do Galerii`, 'success');
+    e.target.value = '';
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (ev) => resolve(ev.target.result);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function loadImageEl(src) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
   }
 
   function startTipsCarousel() {

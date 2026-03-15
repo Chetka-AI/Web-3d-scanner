@@ -101,8 +101,11 @@ const ViewerModule = (() => {
     geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
     geometry.computeBoundingSphere();
 
+    const numPoints = positions.length / 3;
+    const adaptiveSize = numPoints > 5000 ? 0.008 : numPoints > 1000 ? 0.015 : 0.025;
+
     const material = new THREE.PointsMaterial({
-      size: 0.015,
+      size: adaptiveSize,
       vertexColors: true,
       sizeAttenuation: true,
       transparent: true,
@@ -170,6 +173,12 @@ const ViewerModule = (() => {
     controls.update();
   }
 
+  function adjustPointSize(factor) {
+    if (pointCloudObj && pointCloudObj.material) {
+      pointCloudObj.material.size = Math.max(0.002, Math.min(0.1, pointCloudObj.material.size * factor));
+    }
+  }
+
   function clearScene() {
     if (pointCloudObj) {
       scene.remove(pointCloudObj);
@@ -206,6 +215,7 @@ const ViewerModule = (() => {
     toggleMode,
     resetView,
     clearScene,
+    adjustPointSize,
     getInfo,
     isInitialized,
   };
