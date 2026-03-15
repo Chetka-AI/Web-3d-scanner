@@ -67,6 +67,8 @@
   let orientationInterval = null;
   let tipInterval = null;
   let aiMode = true;
+  let scanMode = 'photo'; // 'photo' | 'live'
+  let liveInitialized = false;
 
   /* ===== Initialization ===== */
   window.addEventListener('DOMContentLoaded', () => {
@@ -104,6 +106,16 @@
       aiMode = e.target.checked;
       updateAIStatus();
     });
+
+    // Scan mode selector
+    $('btnModePhoto').addEventListener('click', () => setScanMode('photo'));
+    $('btnModeLive').addEventListener('click', () => setScanMode('live'));
+
+    // Live scanning
+    $('btnStartLive').addEventListener('click', startLiveScanning);
+    $('btnLiveToggle').addEventListener('click', toggleLiveScan);
+    $('btnLiveClose').addEventListener('click', closeLiveScanning);
+    $('btnLiveDone').addEventListener('click', finishLiveScanning);
 
     // Gallery tab
     btnClearGallery.addEventListener('click', clearGallery);
@@ -374,6 +386,287 @@
       img.onerror = reject;
       img.src = src;
     });
+  }
+
+  /* ===== Scan Mode Selector ===== */
+  function setScanMode(mode) {
+    scanMode = mode;
+    $('btnModePhoto').classList.toggle('active', mode === 'photo');
+    $('btnModeLive').classList.toggle('active', mode === 'live');
+    $('photoModeActions').classList.toggle('hidden', mode !== 'photo');
+    $('liveModeActions').classList.toggle('hidden', mode !== 'live');
+
+    if (mode === 'live') {
+      $('aiToggle').checked = true;
+      aiMode = true;
+      updateAIStatus();
+    }
+  }
+
+  /* ===== Live Scanning ===== */
+  async function startLiveScanning() {
+    if (!aiMode) {
+      toast('Skanowanie na żywo wymaga trybu AI', 'error');
+      setScanMode('live');
+      return;
+    }
+
+    if (!AIEngine.isReady()) {
+      showAIOverlay(true);
+      updateAIOverlay('Przygotowanie modelu AI...', 0);
+      try {
+        await AIEngine.initialize((info) => {
+          updateAIOverlay(info.message, info.progress);
+        });
+        showAIOverlay(false);
+        updateAIStatusText('Model AI załadowany i gotowy', 'ready');
+      } catch {
+        showAIOverlay(false);
+        toast('Nie udało się załadować modelu AI', 'error');
+        return;
+      }
+    }
+
+    const videoEl = $('liveVideo');
+    const canvas3d = $('live3d');
+
+    if (!liveInitialized) {
+      RealtimeScanner.init(videoEl, canvas3d, {
+        onStats: updateLiveStats,
+        onStatus: updateLiveStatus,
+      });
+      liveInitialized = true;
+    }
+
+    const ok = await RealtimeScanner.startCamera();
+    if (!ok) {
+      toast('Nie udało się uruchomić kamery', 'error');
+      return;
+    }
+
+    scanIntro.classList.add('hidden');
+    $('scanLive').classList.remove('hidden');
+    updateLiveStatus('ready');
+    toast('Kamera gotowa — naciśnij przycisk aby rozpocząć skanowanie', 'info');
+  }
+
+  function toggleLiveScan() {
+    const btn = $('btnLiveToggle');
+    const playIcon = $('liveIconPlay');
+    const pauseIcon = $('liveIconPause');
+
+    if (!RealtimeScanner.isScanning()) {
+      RealtimeScanner.startScanning();
+      btn.classList.add('active');
+      playIcon.classList.add('hidden');
+      pauseIcon.classList.remove('hidden');
+      if (navigator.vibrate) navigator.vibrate(50);
+    } else if (!RealtimeScanner.isPaused()) {
+      RealtimeScanner.pauseScanning();
+      btn.classList.remove('active');
+      playIcon.classList.remove('hidden');
+      pauseIcon.classList.add('hidden');
+    } else {
+      RealtimeScanner.resumeScanning();
+      btn.classList.add('active');
+      playIcon.classList.add('hidden');
+      pauseIcon.classList.remove('hidden');
+    }
+  }
+
+  function closeLiveScanning() {
+    RealtimeScanner.stopScanning();
+    RealtimeScanner.stopCamera();
+    RealtimeScanner.stopRenderLoop();
+    $('scanLive').classList.add('hidden');
+    scanIntro.classList.remove('hidden');
+    resetLiveUI();
+  }
+
+  async function finishLiveScanning() {
+    RealtimeScanner.stopScanning();
+
+    const stats = RealtimeScanner.getStats();
+    if (stats.points < 100) {
+      toast('Za mało punktów — kontynuuj skanowanie', 'error');
+      return;
+    }
+
+    RealtimeScanner.stopCamera();
+    RealtimeScanner.stopRenderLoop();
+    $('scanLive').classList.add('hidden');
+    scanIntro.classList.remove('hidden');
+    resetLiveUI();
+
+    toast('Budowanie modelu z chmury na żywo...', 'info');
+
+    switchTab('tabProcess');
+    processIdle.classList.add('hidden');
+    processActive.classList.remove('hidden');
+    processStats.classList.add('hidden');
+    btnViewResult.classList.add('hidden');
+    processSteps.innerHTML = '';
+
+    const cloud = RealtimeScanner.getPointCloud();
+
+    const steps = ['Filtrowanie chmury', 'Budowanie siatki 3D', 'Finalizacja'];
+    const report = (stepIdx, pct) => {
+      const base = (stepIdx / steps.length) * 100;
+      const add = (pct / 100) * (100 / steps.length);
+      const percent = Math.min(Math.round(base + add), 100);
+      processPercent.textContent = percent + '%';
+      processBar.style.width = percent + '%';
+      processSteps.innerHTML = '';
+      steps.forEach((name, i) => {
+        const div = document.createElement('div');
+        div.className = 'process-step';
+        if (i < stepIdx) div.classList.add('done');
+        else if (i === stepIdx) div.classList.add('active');
+        const icon = i < stepIdx ? '✓' : i === stepIdx ? '◌' : '·';
+        div.innerHTML = `<div class="step-icon">${icon}</div><span>${name}</span>`;
+        processSteps.appendChild(div);
+      });
+    };
+
+    report(0, 0);
+    await new Promise(r => setTimeout(r, 50));
+
+    const mesh = buildMeshFromCloud(cloud, (p) => {
+      if (p < 50) report(0, p * 2);
+      else report(1, (p - 50) * 2);
+    });
+
+    report(2, 100);
+
+    const resultData = {
+      pointCloud: cloud,
+      mesh,
+      stats: {
+        points: cloud.positions.length / 3,
+        triangles: mesh.indices.length / 3,
+        time: '—',
+      },
+    };
+
+    ProcessingModule.setResult(resultData);
+
+    processStats.classList.remove('hidden');
+    statPoints.textContent = resultData.stats.points.toLocaleString();
+    statTriangles.textContent = resultData.stats.triangles.toLocaleString();
+    statTime.textContent = 'na żywo';
+    btnViewResult.classList.remove('hidden');
+
+    toast('Model z skanowania na żywo gotowy!', 'success');
+  }
+
+  function buildMeshFromCloud(cloud, prog) {
+    const n = cloud.positions.length / 3;
+    if (n < 4) return { indices: new Uint32Array(0) };
+
+    const adaptiveBucket = Math.max(0.02, Math.min(0.1, 2.0 / Math.cbrt(n)));
+    const grid = new Map();
+    const positions = cloud.positions;
+
+    for (let i = 0; i < n; i++) {
+      const gx = Math.floor(positions[i * 3] / adaptiveBucket);
+      const gy = Math.floor(positions[i * 3 + 1] / adaptiveBucket);
+      const gz = Math.floor(positions[i * 3 + 2] / adaptiveBucket);
+      const key = `${gx},${gy},${gz}`;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    }
+
+    prog(20);
+
+    const indices = [];
+    const maxDist = adaptiveBucket * 2.0;
+    const maxDistSq = maxDist * maxDist;
+    const processed = new Set();
+
+    let count = 0;
+    for (const [key, bucket] of grid) {
+      const [gx, gy, gz] = key.split(',').map(Number);
+      const neighbors = [];
+      for (let dx = -1; dx <= 1; dx++)
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dz = -1; dz <= 1; dz++) {
+            const nk = `${gx + dx},${gy + dy},${gz + dz}`;
+            if (grid.has(nk)) neighbors.push(...grid.get(nk));
+          }
+
+      for (const i of bucket) {
+        const nearest = [];
+        for (const j of neighbors) {
+          if (j <= i) continue;
+          const dx = positions[j*3] - positions[i*3];
+          const dy = positions[j*3+1] - positions[i*3+1];
+          const dz = positions[j*3+2] - positions[i*3+2];
+          const d2 = dx*dx + dy*dy + dz*dz;
+          if (d2 < maxDistSq) nearest.push({ idx: j, dist: d2 });
+        }
+        nearest.sort((a, b) => a.dist - b.dist);
+        const top = nearest.slice(0, 6);
+        for (let a = 0; a < top.length; a++) {
+          for (let b = a + 1; b < top.length; b++) {
+            const triKey = [i, top[a].idx, top[b].idx].sort().join(',');
+            if (processed.has(triKey)) continue;
+            processed.add(triKey);
+            const j = top[a].idx, k = top[b].idx;
+            const edx = positions[j*3]-positions[k*3];
+            const edy = positions[j*3+1]-positions[k*3+1];
+            const edz = positions[j*3+2]-positions[k*3+2];
+            if (edx*edx+edy*edy+edz*edz < maxDistSq) indices.push(i, j, k);
+          }
+        }
+      }
+      count++;
+      if (count % 100 === 0) prog(20 + (count / grid.size) * 80);
+    }
+
+    return { indices: new Uint32Array(indices) };
+  }
+
+  function updateLiveStats(stats) {
+    $('liveFps').querySelector('span').textContent = `${stats.fps} FPS`;
+    $('livePoints').querySelector('span').textContent = `${stats.points.toLocaleString()} pkt`;
+    $('liveFrames').querySelector('span').textContent = `${stats.frames} klatek`;
+  }
+
+  function updateLiveStatus(status) {
+    const badge = $('liveStatusBadge');
+    const dot = $('liveRecDot');
+    badge.className = 'live-status-badge';
+
+    switch (status) {
+      case 'ready':
+        badge.textContent = 'Gotowy';
+        dot.classList.add('hidden');
+        break;
+      case 'scanning':
+        badge.textContent = 'Skanowanie...';
+        badge.classList.add('scanning');
+        dot.classList.remove('hidden');
+        break;
+      case 'paused':
+        badge.textContent = 'Pauza';
+        badge.classList.add('paused');
+        dot.classList.add('hidden');
+        break;
+      case 'stopped':
+        badge.textContent = 'Zatrzymano';
+        dot.classList.add('hidden');
+        break;
+    }
+  }
+
+  function resetLiveUI() {
+    const btn = $('btnLiveToggle');
+    btn.classList.remove('active');
+    $('liveIconPlay').classList.remove('hidden');
+    $('liveIconPause').classList.add('hidden');
+    $('liveRecDot').classList.add('hidden');
+    $('liveStatusBadge').textContent = 'Gotowy';
+    $('liveStatusBadge').className = 'live-status-badge';
   }
 
   function startTipsCarousel() {

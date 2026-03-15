@@ -14,6 +14,7 @@ const ProcessingModule = (() => {
 
   function cancel() { cancelled = true; }
   function getResult() { return resultData; }
+  function setResult(data) { resultData = data; }
 
   async function run(photos, onProgress) {
     cancelled = false;
@@ -1133,6 +1134,7 @@ const ProcessingModule = (() => {
     runAI,
     cancel,
     getResult,
+    setResult,
     exportOBJ,
     exportPLY,
   };
