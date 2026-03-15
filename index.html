@@ -126,6 +126,21 @@
                 <span>0 / 24</span>
               </div>
             </div>
+            <div class="camera-coverage" id="cameraCoverage">
+              <svg viewBox="0 0 44 44" class="coverage-ring">
+                <circle cx="22" cy="22" r="19" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="3"/>
+                <circle cx="22" cy="22" r="19" fill="none" stroke="url(#coverageGrad)" stroke-width="3"
+                  stroke-dasharray="119.38" stroke-dashoffset="119.38" stroke-linecap="round"
+                  id="coverageArc" transform="rotate(-90 22 22)"/>
+                <defs>
+                  <linearGradient id="coverageGrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#00d4ff"/>
+                    <stop offset="100%" stop-color="#34d399"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+              <span id="coverageText" class="coverage-text">0%</span>
+            </div>
           </div>
           <div class="camera-controls">
             <button id="btnFlip" class="btn-circle btn-circle-sm" title="Przełącz kamerę">
@@ -145,6 +160,14 @@
             </button>
           </div>
           <div id="photoStrip" class="photo-strip"></div>
+          <div id="scanTips" class="scan-tips">
+            <div class="tip-carousel">
+              <div class="tip-item active">Powoli obchodź obiekt dookoła</div>
+              <div class="tip-item">Utrzymaj stałą odległość od obiektu</div>
+              <div class="tip-item">Unikaj rozmycia — trzymaj telefon stabilnie</div>
+              <div class="tip-item">Dobrze oświetlony obiekt = lepszy model</div>
+            </div>
+          </div>
         </div>
 
       </div>

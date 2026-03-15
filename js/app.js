@@ -65,6 +65,7 @@
   let processing = false;
   let modalPhotoId = null;
   let orientationInterval = null;
+  let tipInterval = null;
 
   /* ===== Initialization ===== */
   window.addEventListener('DOMContentLoaded', () => {
@@ -153,6 +154,7 @@
     scanCamera.classList.remove('hidden');
     updatePhotoHud();
     startOrientationHud();
+    startTipsCarousel();
     toast('Kamera aktywna — rób zdjęcia dookoła obiektu', 'info');
   }
 
@@ -161,6 +163,7 @@
     scanCamera.classList.add('hidden');
     scanIntro.classList.remove('hidden');
     stopOrientationHud();
+    stopTipsCarousel();
   }
 
   async function flipCamera() {
@@ -174,12 +177,23 @@
       toast('Osiągnięto limit zdjęć', 'warning');
       return;
     }
+
+    if (navigator.vibrate) navigator.vibrate(30);
+
     btnCapture.classList.add('flash');
     setTimeout(() => btnCapture.classList.remove('flash'), 350);
 
     addPhotoToStrip(photo);
     updatePhotoHud();
     updateGalleryBadge();
+    updateCoverageRing();
+
+    const count = CameraModule.getPhotos().length;
+    if (count === 3) {
+      toast('Dobra robota! Kontynuuj obrót dookoła obiektu', 'success');
+    } else if (count === 12) {
+      toast('Świetnie! Masz 12 zdjęć — możesz przetwarzać lub robić więcej', 'success');
+    }
   }
 
   function addPhotoToStrip(photo) {
@@ -199,13 +213,44 @@
     orientationInterval = setInterval(() => {
       const o = CameraModule.getOrientation();
       hudAngle.querySelector('span').textContent = `${Math.round(o.alpha)}°`;
+      updateCoverageRing();
     }, 200);
+  }
+
+  function updateCoverageRing() {
+    const progress = CameraModule.getAngleProgress();
+    const arc = document.getElementById('coverageArc');
+    const text = document.getElementById('coverageText');
+    if (arc && text) {
+      const circumference = 2 * Math.PI * 19;
+      const offset = circumference - (progress.coverage / 100) * circumference;
+      arc.style.strokeDashoffset = offset;
+      text.textContent = progress.coverage + '%';
+    }
   }
 
   function stopOrientationHud() {
     if (orientationInterval) {
       clearInterval(orientationInterval);
       orientationInterval = null;
+    }
+  }
+
+  function startTipsCarousel() {
+    const tips = document.querySelectorAll('#scanTips .tip-item');
+    if (!tips.length) return;
+    let idx = 0;
+    tipInterval = setInterval(() => {
+      tips[idx].classList.remove('active');
+      idx = (idx + 1) % tips.length;
+      tips[idx].classList.add('active');
+    }, 4000);
+  }
+
+  function stopTipsCarousel() {
+    if (tipInterval) {
+      clearInterval(tipInterval);
+      tipInterval = null;
     }
   }
 
@@ -227,7 +272,12 @@
     photos.forEach((photo, i) => {
       const div = document.createElement('div');
       div.className = 'gallery-item';
-      div.innerHTML = `<img src="${photo.thumbUrl}" alt="Zdjęcie ${i + 1}"><div class="gallery-num">${i + 1}</div>`;
+      const angle = Math.round(photo.orientation.alpha || 0);
+      div.innerHTML = `
+        <img src="${photo.thumbUrl}" alt="Zdjęcie ${i + 1}">
+        <div class="gallery-num">${i + 1}</div>
+        <div class="gallery-angle">${angle}°</div>
+      `;
       div.addEventListener('click', () => openModal(photo));
       galleryGrid.appendChild(div);
     });
@@ -244,6 +294,10 @@
   }
 
   function clearGallery() {
+    const count = CameraModule.getPhotos().length;
+    if (count === 0) return;
+    if (!confirm(`Usunąć wszystkie ${count} zdjęć?`)) return;
+
     CameraModule.clearPhotos();
     photoStrip.innerHTML = '';
     updatePhotoHud();

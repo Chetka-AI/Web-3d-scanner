@@ -10,6 +10,7 @@ const ViewerModule = (() => {
   let showMesh = false;
   let initialized = false;
   let boundingSize = 1;
+  let autoRotate = true;
 
   function init(canvas) {
     canvasEl = canvas;
@@ -36,6 +37,13 @@ const ViewerModule = (() => {
     controls.minDistance = 0.2;
     controls.maxDistance = 10;
     controls.target.set(0, 0, 0);
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.5;
+
+    controls.addEventListener('start', () => {
+      autoRotate = false;
+      controls.autoRotate = false;
+    });
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
@@ -44,8 +52,14 @@ const ViewerModule = (() => {
     dirLight.position.set(2, 3, 2);
     scene.add(dirLight);
 
+    scene.fog = new THREE.FogExp2(0x0a0e1a, 0.15);
+
     const gridHelper = new THREE.GridHelper(4, 20, 0x1a2035, 0x111827);
     scene.add(gridHelper);
+
+    const axesHelper = new THREE.AxesHelper(0.3);
+    axesHelper.position.set(-1.8, 0.01, -1.8);
+    scene.add(axesHelper);
 
     resize();
     initialized = true;
@@ -151,6 +165,8 @@ const ViewerModule = (() => {
   function resetView() {
     controls.target.set(0, 0, 0);
     camera.position.set(0, boundingSize * 0.5, boundingSize * 2.5);
+    autoRotate = true;
+    controls.autoRotate = true;
     controls.update();
   }
 

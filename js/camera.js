@@ -146,6 +146,25 @@ const CameraModule = (() => {
     return stream !== null;
   }
 
+  function getAngleProgress() {
+    if (photos.length < 2) return { coverage: 0, angles: [] };
+    const angles = photos.map(p => {
+      const a = p.orientation.alpha || 0;
+      return (a + 360) % 360;
+    });
+    angles.sort((a, b) => a - b);
+
+    let maxGap = 0;
+    for (let i = 1; i < angles.length; i++) {
+      maxGap = Math.max(maxGap, angles[i] - angles[i - 1]);
+    }
+    const wrapGap = (360 - angles[angles.length - 1]) + angles[0];
+    maxGap = Math.max(maxGap, wrapGap);
+
+    const coverage = Math.min(100, Math.round(((360 - maxGap) / 360) * 100));
+    return { coverage, angles };
+  }
+
   return {
     init,
     start,
@@ -156,6 +175,7 @@ const CameraModule = (() => {
     removePhoto,
     clearPhotos,
     getOrientation,
+    getAngleProgress,
     isActive,
     MAX_PHOTOS,
   };

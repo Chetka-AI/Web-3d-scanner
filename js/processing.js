@@ -258,6 +258,17 @@ const ProcessingModule = (() => {
       await yieldFrame();
     }
 
+    // Also match every-other pair for better robustness
+    for (let i = 0; i < allFeatures.length - 2; i++) {
+      const fa = allFeatures[i];
+      const fb = allFeatures[i + 2];
+      const matches = matchPair(fa, fb);
+      if (matches.length > 5) {
+        pairMatches.push({ i, j: i + 2, matches });
+      }
+    }
+
+    // Close the loop
     if (allFeatures.length > 2) {
       const fa = allFeatures[allFeatures.length - 1];
       const fb = allFeatures[0];
