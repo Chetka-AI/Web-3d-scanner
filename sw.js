@@ -1,8 +1,9 @@
-const CACHE_NAME = 'scan3d-v1';
+const CACHE_NAME = 'scan3d-v2';
 const ASSETS = [
   '/',
   '/index.html',
   '/css/style.css',
+  '/js/ai-engine.js',
   '/js/app.js',
   '/js/camera.js',
   '/js/processing.js',

@@ -92,6 +92,26 @@
                 <span>Uruchom rekonstrukcję 3D</span>
               </div>
             </div>
+            <div class="ai-mode-card">
+              <div class="ai-mode-header">
+                <div class="ai-mode-info">
+                  <div class="ai-badge">AI</div>
+                  <div>
+                    <div class="ai-mode-title">Tryb AI — Depth Anything V2</div>
+                    <div class="ai-mode-desc">Głęboka analiza obrazu z sieci neuronowej</div>
+                  </div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="aiToggle" checked>
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div id="aiModelStatus" class="ai-model-status">
+                <span class="ai-status-dot"></span>
+                <span>Gotowy do pobrania (~27 MB, cache po 1. uruchomieniu)</span>
+              </div>
+            </div>
+
             <button id="btnStartCamera" class="btn btn-primary btn-lg">
               <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
                 <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -360,6 +380,33 @@
       </button>
     </nav>
 
+    <!-- AI Model Download Overlay -->
+    <div id="aiOverlay" class="ai-overlay hidden">
+      <div class="ai-overlay-card">
+        <div class="ai-overlay-icon">
+          <svg viewBox="0 0 48 48" fill="none" width="48" height="48">
+            <circle cx="24" cy="24" r="20" stroke="url(#aiGrad)" stroke-width="2.5"/>
+            <path d="M16 24C16 19.6 19.6 16 24 16" stroke="url(#aiGrad)" stroke-width="2.5" stroke-linecap="round">
+              <animateTransform attributeName="transform" type="rotate" from="0 24 24" to="360 24 24" dur="1s" repeatCount="indefinite"/>
+            </path>
+            <text x="24" y="28" text-anchor="middle" fill="url(#aiGrad)" font-size="10" font-weight="700">AI</text>
+            <defs>
+              <linearGradient id="aiGrad" x1="0" y1="0" x2="48" y2="48">
+                <stop stop-color="#00d4ff"/>
+                <stop offset="1" stop-color="#7b2ff7"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <h3>Ładowanie modelu AI</h3>
+        <p id="aiOverlayMessage">Przygotowanie...</p>
+        <div class="progress-bar" style="margin: 16px 0">
+          <div id="aiOverlayBar" class="progress-fill"></div>
+        </div>
+        <p class="ai-overlay-note">Model jest zapisywany w cache przeglądarki.<br>Kolejne uruchomienia będą błyskawiczne.</p>
+      </div>
+    </div>
+
     <!-- Toast notifications -->
     <div id="toastContainer" class="toast-container"></div>
 
@@ -379,6 +426,7 @@
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="js/ai-engine.js"></script>
   <script src="js/camera.js"></script>
   <script src="js/processing.js"></script>
   <script src="js/viewer.js"></script>

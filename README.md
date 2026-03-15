@@ -4,20 +4,33 @@ Aplikacja webowa (PWA) do skanowania obiektów z kamery smartfona i generowania 
 
 ## Funkcje
 
-- **Podgląd kamery** — dostęp do tylnej/przedniej kamery przez WebRTC
-- **Przechwytywanie zdjęć** — zapis zdjęć z informacją o orientacji urządzenia
-- **Galeria** — podgląd, usuwanie zdjęć
-- **Rekonstrukcja 3D** — detekcja cech (Harris), dopasowywanie, triangulacja, generowanie chmury punktów i siatki
-- **Podgląd 3D** — interaktywna wizualizacja Three.js (obrót, zoom, pan)
+### Tryb AI (domyślny)
+- **Depth Anything V2** — sieć neuronowa do estymacji głębi z pojedynczych zdjęć
+- **Transformers.js** — inference AI bezpośrednio w przeglądarce (WASM/WebGPU)
+- **Gęsta chmura punktów** — tysiące kolorowych punktów 3D z map głębi
+- **Automatyczne oddzielanie tła** — analiza histogramu głębi
+
+### Tryb klasyczny (fallback)
+- **Detekcja cech Harris** — narożniki i deskryptory patch
+- **Dopasowywanie NCC** — sparowane cechy między widokami
+- **Triangulacja geometryczna** — punkty 3D z par dopasowanych cech
+
+### Wspólne
+- **Podgląd kamery** — WebRTC, przełączanie przód/tył, orientacja urządzenia
+- **Galeria** — miniaturki z kątami, podgląd, usuwanie
+- **Wizualizacja 3D** — Three.js, OrbitControls, auto-rotacja, tryb chmura/siatka
 - **Eksport** — OBJ i PLY z kolorami wierzchołków
-- **PWA** — działa offline, można zainstalować na ekranie głównym
+- **Wczytywanie plików** — upload zdjęć bez kamery
+- **PWA** — offline, instalacja na ekranie głównym
 
 ## Technologie
 
-- HTML5 / CSS3 / JavaScript (vanilla)
+- HTML5 / CSS3 / JavaScript (vanilla, zero bundlerów)
+- **Transformers.js v3** — AI w przeglądarce (Hugging Face)
+- **Depth Anything V2 Small** (int8, ~27MB) — monokularna estymacja głębi
 - WebRTC (Camera API)
 - Device Orientation API
-- Three.js (wizualizacja 3D)
+- Three.js r128 (wizualizacja 3D)
 - Service Worker (offline PWA)
 
 ## Uruchomienie
@@ -37,12 +50,14 @@ Otwórz na telefonie: `http://<IP>:8000`
 ## Jak używać
 
 1. Otwórz aplikację na smartfonie
-2. W zakładce **Skanuj** uruchom kamerę
-3. Wykonaj 12–24 zdjęć obiektu z różnych kątów (obiektyw obchodzi obiekt dookoła)
-4. Przejdź do **Galeria** i kliknij **Przetwórz**
-5. Poczekaj na rekonstrukcję w zakładce **Buduj**
-6. Obejrzyj model w zakładce **Model 3D**
-7. Eksportuj do OBJ lub PLY
+2. Upewnij się, że **Tryb AI** jest włączony (domyślnie tak)
+3. W zakładce **Skanuj** uruchom kamerę (lub wczytaj zdjęcia z plików)
+4. Wykonaj 12–24 zdjęć obiektu z różnych kątów (obchodząc go dookoła)
+5. Przejdź do **Galeria** i kliknij **Przetwórz (model 3D)**
+6. Przy pierwszym użyciu AI model (~27 MB) zostanie pobrany i zapisany w cache
+7. Poczekaj na rekonstrukcję w zakładce **Buduj**
+8. Obejrzyj model w zakładce **Model 3D** (obracaj, przybliżaj, przełączaj tryby)
+9. Eksportuj do OBJ lub PLY
 
 ## Struktura projektu
 
@@ -53,9 +68,10 @@ Otwórz na telefonie: `http://<IP>:8000`
 ├── css/
 │   └── style.css       # Style (mobile-first, dark theme)
 ├── js/
+│   ├── ai-engine.js    # Moduł AI (Transformers.js, Depth Anything V2)
 │   ├── app.js          # Kontroler aplikacji, nawigacja
 │   ├── camera.js       # Moduł kamery (WebRTC)
-│   ├── processing.js   # Silnik rekonstrukcji 3D
+│   ├── processing.js   # Silnik rekonstrukcji 3D (AI + klasyczny)
 │   └── viewer.js       # Podgląd 3D (Three.js)
 └── icons/
     ├── favicon.svg

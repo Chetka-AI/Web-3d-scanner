@@ -66,6 +66,7 @@
   let modalPhotoId = null;
   let orientationInterval = null;
   let tipInterval = null;
+  let aiMode = true;
 
   /* ===== Initialization ===== */
   window.addEventListener('DOMContentLoaded', () => {
@@ -78,6 +79,7 @@
     }, 1800);
 
     bindEvents();
+    initAIMode();
   });
 
   /* ===== Event Binding ===== */
@@ -96,6 +98,12 @@
     // File upload fallback
     $('btnLoadFiles').addEventListener('click', () => $('fileInput').click());
     $('fileInput').addEventListener('change', handleFileUpload);
+
+    // AI mode toggle
+    $('aiToggle').addEventListener('change', (e) => {
+      aiMode = e.target.checked;
+      updateAIStatus();
+    });
 
     // Gallery tab
     btnClearGallery.addEventListener('click', clearGallery);
@@ -150,6 +158,66 @@
     } else if (ViewerModule.isInitialized()) {
       ViewerModule.stopLoop();
     }
+  }
+
+  /* ===== AI Mode ===== */
+  async function initAIMode() {
+    const toggle = $('aiToggle');
+    aiMode = toggle.checked;
+
+    try {
+      const supported = await AIEngine.checkSupport();
+      if (!supported) {
+        toggle.checked = false;
+        toggle.disabled = true;
+        aiMode = false;
+        updateAIStatusText('AI niedostępne w tej przeglądarce', 'off');
+      } else {
+        updateAIStatusText('Gotowy do pobrania (~27 MB, cache po 1. uruchomieniu)', 'waiting');
+      }
+    } catch {
+      toggle.checked = false;
+      toggle.disabled = true;
+      aiMode = false;
+      updateAIStatusText('AI niedostępne', 'off');
+    }
+  }
+
+  function updateAIStatus() {
+    if (aiMode) {
+      if (AIEngine.isReady()) {
+        updateAIStatusText('Model AI załadowany i gotowy', 'ready');
+      } else {
+        updateAIStatusText('Gotowy do pobrania (~27 MB, cache po 1. uruchomieniu)', 'waiting');
+      }
+    } else {
+      updateAIStatusText('Tryb klasyczny (bez AI)', 'off');
+    }
+  }
+
+  function updateAIStatusText(text, state) {
+    const statusEl = $('aiModelStatus');
+    if (!statusEl) return;
+    statusEl.className = 'ai-model-status';
+    if (state === 'ready') statusEl.classList.add('ready');
+    if (state === 'loading') statusEl.classList.add('loading');
+    statusEl.querySelector('span:last-child').textContent = text;
+  }
+
+  function showAIOverlay(show) {
+    const overlay = $('aiOverlay');
+    if (show) {
+      overlay.classList.remove('hidden');
+    } else {
+      overlay.classList.add('hidden');
+    }
+  }
+
+  function updateAIOverlay(message, progress) {
+    const msg = $('aiOverlayMessage');
+    const bar = $('aiOverlayBar');
+    if (msg) msg.textContent = message;
+    if (bar) bar.style.width = progress + '%';
   }
 
   /* ===== Camera ===== */
@@ -427,7 +495,37 @@
     btnViewResult.classList.add('hidden');
     processSteps.innerHTML = '';
 
-    const result = await ProcessingModule.run(photos, onProcessProgress);
+    let result;
+
+    if (aiMode && AIEngine.isSupported() !== false) {
+      if (!AIEngine.isReady()) {
+        showAIOverlay(true);
+        updateAIOverlay('Przygotowanie modelu AI...', 0);
+        updateAIStatusText('Pobieranie modelu...', 'loading');
+        try {
+          await AIEngine.initialize((info) => {
+            updateAIOverlay(info.message, info.progress);
+          });
+          showAIOverlay(false);
+          updateAIStatusText('Model AI załadowany i gotowy', 'ready');
+          toast('Model AI załadowany — rozpoczynam rekonstrukcję', 'success');
+        } catch (err) {
+          showAIOverlay(false);
+          aiMode = false;
+          $('aiToggle').checked = false;
+          updateAIStatusText('Błąd ładowania AI — tryb klasyczny', 'off');
+          toast('AI niedostępne — używam trybu klasycznego', 'error');
+        }
+      }
+
+      if (aiMode && AIEngine.isReady()) {
+        result = await ProcessingModule.runAI(photos, onProcessProgress);
+      } else {
+        result = await ProcessingModule.run(photos, onProcessProgress);
+      }
+    } else {
+      result = await ProcessingModule.run(photos, onProcessProgress);
+    }
 
     processing = false;
 
@@ -442,7 +540,8 @@
     statTime.textContent = result.stats.time + 's';
     btnViewResult.classList.remove('hidden');
 
-    toast('Model 3D gotowy!', 'success');
+    const mode = aiMode && AIEngine.isReady() ? 'AI' : 'klasyczny';
+    toast(`Model 3D gotowy! (tryb ${mode})`, 'success');
   }
 
   function onProcessProgress({ stepIdx, stepName, steps, percent }) {
