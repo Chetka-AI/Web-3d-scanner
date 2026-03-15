@@ -716,11 +716,425 @@ const ProcessingModule = (() => {
     return ply;
   }
 
+  /* ==========================================================
+   *  AI-ENHANCED PIPELINE — Depth Anything V2 + dense cloud
+   * ========================================================== */
+
+  const AI_WORK_SIZE = 512;
+
+  async function runAI(photos, onProgress) {
+    cancelled = false;
+    resultData = null;
+
+    const steps = [
+      'Inicjalizacja modelu AI',
+      'Przygotowanie obrazów',
+      'Analiza głębi (Depth Anything V2)',
+      'Estymacja pozycji kamer',
+      'Generowanie gęstej chmury punktów',
+      'Filtrowanie i optymalizacja',
+      'Budowanie siatki 3D',
+      'Finalizacja modelu',
+    ];
+
+    const report = (stepIdx, pct) => {
+      if (onProgress) {
+        const base = (stepIdx / steps.length) * 100;
+        const add = (pct / 100) * (100 / steps.length);
+        onProgress({
+          stepIdx,
+          stepName: steps[stepIdx],
+          steps,
+          percent: Math.min(Math.round(base + add), 100),
+        });
+      }
+    };
+
+    const startTime = performance.now();
+
+    report(0, 0);
+    if (!AIEngine.isReady()) {
+      try {
+        await AIEngine.initialize((info) => {
+          report(0, info.progress || 0);
+        });
+      } catch (err) {
+        console.error('AI init failed, falling back to basic pipeline');
+        return run(photos, onProgress);
+      }
+    }
+    report(0, 100);
+    if (cancelled) return null;
+
+    report(1, 0);
+    const images = await prepareImagesForAI(photos, p => report(1, p));
+    if (cancelled) return null;
+
+    report(2, 0);
+    const depthMaps = await estimateDepthMaps(images, p => report(2, p));
+    if (cancelled) return null;
+
+    report(3, 0);
+    const cameras = estimateCameras(photos, images.length, p => report(3, p));
+    if (cancelled) return null;
+
+    report(4, 0);
+    const rawCloud = await generateAIPointCloud(images, depthMaps, cameras, p => report(4, p));
+    if (cancelled) return null;
+
+    report(5, 0);
+    const pointCloud = filterAndOptimize(rawCloud, p => report(5, p));
+    if (cancelled) return null;
+
+    report(6, 0);
+    const mesh = buildMeshDense(pointCloud, p => report(6, p));
+    if (cancelled) return null;
+
+    report(7, 50);
+    await yieldFrame();
+
+    const elapsed = ((performance.now() - startTime) / 1000).toFixed(1);
+
+    resultData = {
+      pointCloud,
+      mesh,
+      stats: {
+        points: pointCloud.positions.length / 3,
+        triangles: mesh.indices.length / 3,
+        time: elapsed,
+      },
+    };
+
+    report(7, 100);
+    return resultData;
+  }
+
+  async function prepareImagesForAI(photos, prog) {
+    const images = [];
+    for (let i = 0; i < photos.length; i++) {
+      const img = await loadImage(photos[i].dataUrl);
+      const scale = AI_WORK_SIZE / Math.max(img.width, img.height);
+      const w = Math.round(img.width * scale);
+      const h = Math.round(img.height * scale);
+
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const imageData = ctx.getImageData(0, 0, w, h);
+
+      images.push({ width: w, height: h, imageData, canvas, ctx });
+      prog(((i + 1) / photos.length) * 100);
+      await yieldFrame();
+    }
+    return images;
+  }
+
+  async function estimateDepthMaps(images, prog) {
+    const depthMaps = [];
+    for (let i = 0; i < images.length; i++) {
+      const blobUrl = await AIEngine.canvasToBlobUrl(images[i].canvas);
+      try {
+        const result = await AIEngine.estimateDepth(blobUrl);
+        const depthMap = AIEngine.extractDepthMap(result);
+        depthMaps.push(depthMap);
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+      prog(((i + 1) / images.length) * 100);
+      await yieldFrame();
+    }
+    return depthMaps;
+  }
+
+  async function generateAIPointCloud(images, depthMaps, cameras, prog) {
+    const allPositions = [];
+    const allColors = [];
+
+    const stride = 2;
+    const fovDeg = 60;
+    const fovRad = fovDeg * Math.PI / 180;
+    const depthScale = 1.5;
+    const nearPlane = 0.2;
+    const farPlane = 3.0;
+
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i];
+      const depth = depthMaps[i];
+      const cam = cameras[i];
+
+      const dw = depth.width;
+      const dh = depth.height;
+      const iw = img.width;
+      const ih = img.height;
+
+      const fx = dw / (2 * Math.tan(fovRad / 2));
+      const fy = fx;
+      const cx = dw / 2;
+      const cy = dh / 2;
+
+      const cosA = Math.cos(cam.angle);
+      const sinA = Math.sin(cam.angle);
+
+      const bgThreshold = computeBackgroundThreshold(depth.data);
+
+      for (let y = 0; y < dh; y += stride) {
+        for (let x = 0; x < dw; x += stride) {
+          const d = depth.data[y * dw + x];
+
+          if (d < bgThreshold) continue;
+
+          const z = nearPlane + (1.0 - d) * (farPlane - nearPlane);
+          const scaledZ = z * depthScale;
+          const camX = (x - cx) / fx * scaledZ;
+          const camY = -(y - cy) / fy * scaledZ;
+          const camZ = -scaledZ;
+
+          const wx = camX * cosA - camZ * sinA;
+          const wz = camX * sinA + camZ * cosA;
+
+          const imgX = Math.min(iw - 1, Math.max(0, Math.floor(x * (iw / dw))));
+          const imgY = Math.min(ih - 1, Math.max(0, Math.floor(y * (ih / dh))));
+          const pIdx = (imgY * iw + imgX) * 4;
+          const r = img.imageData.data[pIdx] / 255;
+          const g = img.imageData.data[pIdx + 1] / 255;
+          const b = img.imageData.data[pIdx + 2] / 255;
+
+          allPositions.push(wx, camY, wz);
+          allColors.push(r, g, b);
+        }
+      }
+
+      prog(((i + 1) / images.length) * 100);
+      await yieldFrame();
+    }
+
+    return {
+      positions: new Float32Array(allPositions),
+      colors: new Float32Array(allColors),
+    };
+  }
+
+  function computeBackgroundThreshold(depthData) {
+    const buckets = 50;
+    const hist = new Float32Array(buckets);
+    for (let i = 0; i < depthData.length; i++) {
+      const bin = Math.min(buckets - 1, Math.floor(depthData[i] * buckets));
+      hist[bin]++;
+    }
+
+    let peakBin = 0, peakVal = 0;
+    for (let i = 0; i < buckets; i++) {
+      if (hist[i] > peakVal) {
+        peakVal = hist[i];
+        peakBin = i;
+      }
+    }
+
+    if (peakBin < buckets * 0.3) {
+      return (peakBin + 2) / buckets;
+    }
+
+    return 0.15;
+  }
+
+  function filterAndOptimize(rawCloud, prog) {
+    const n = rawCloud.positions.length / 3;
+    if (n === 0) {
+      prog(100);
+      return rawCloud;
+    }
+
+    prog(10);
+
+    const center = [0, 0, 0];
+    for (let i = 0; i < n; i++) {
+      center[0] += rawCloud.positions[i * 3];
+      center[1] += rawCloud.positions[i * 3 + 1];
+      center[2] += rawCloud.positions[i * 3 + 2];
+    }
+    center[0] /= n;
+    center[1] /= n;
+    center[2] /= n;
+
+    prog(30);
+
+    const distances = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const dx = rawCloud.positions[i * 3] - center[0];
+      const dy = rawCloud.positions[i * 3 + 1] - center[1];
+      const dz = rawCloud.positions[i * 3 + 2] - center[2];
+      distances[i] = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    const sorted = [...distances].sort((a, b) => a - b);
+    const p95 = sorted[Math.floor(n * 0.95)];
+    const maxDist = p95 * 1.5;
+
+    prog(50);
+
+    const filteredPos = [];
+    const filteredCol = [];
+    for (let i = 0; i < n; i++) {
+      if (distances[i] <= maxDist) {
+        filteredPos.push(
+          rawCloud.positions[i * 3] - center[0],
+          rawCloud.positions[i * 3 + 1] - center[1],
+          rawCloud.positions[i * 3 + 2] - center[2]
+        );
+        filteredCol.push(
+          rawCloud.colors[i * 3],
+          rawCloud.colors[i * 3 + 1],
+          rawCloud.colors[i * 3 + 2]
+        );
+      }
+    }
+
+    prog(80);
+
+    const voxelSize = 0.008;
+    const voxelMap = new Map();
+    const fnPos = filteredPos;
+    const fnCol = filteredCol;
+    const fn = fnPos.length / 3;
+
+    for (let i = 0; i < fn; i++) {
+      const gx = Math.floor(fnPos[i * 3] / voxelSize);
+      const gy = Math.floor(fnPos[i * 3 + 1] / voxelSize);
+      const gz = Math.floor(fnPos[i * 3 + 2] / voxelSize);
+      const key = `${gx},${gy},${gz}`;
+
+      if (!voxelMap.has(key)) {
+        voxelMap.set(key, {
+          px: 0, py: 0, pz: 0,
+          cr: 0, cg: 0, cb: 0,
+          count: 0,
+        });
+      }
+      const v = voxelMap.get(key);
+      v.px += fnPos[i * 3];
+      v.py += fnPos[i * 3 + 1];
+      v.pz += fnPos[i * 3 + 2];
+      v.cr += fnCol[i * 3];
+      v.cg += fnCol[i * 3 + 1];
+      v.cb += fnCol[i * 3 + 2];
+      v.count++;
+    }
+
+    const outPos = new Float32Array(voxelMap.size * 3);
+    const outCol = new Float32Array(voxelMap.size * 3);
+    let idx = 0;
+    for (const v of voxelMap.values()) {
+      outPos[idx * 3] = v.px / v.count;
+      outPos[idx * 3 + 1] = v.py / v.count;
+      outPos[idx * 3 + 2] = v.pz / v.count;
+      outCol[idx * 3] = v.cr / v.count;
+      outCol[idx * 3 + 1] = v.cg / v.count;
+      outCol[idx * 3 + 2] = v.cb / v.count;
+      idx++;
+    }
+
+    prog(100);
+    return { positions: outPos, colors: outCol };
+  }
+
+  function buildMeshDense(pointCloud, prog) {
+    const n = pointCloud.positions.length / 3;
+    if (n < 4) {
+      prog(100);
+      return { indices: new Uint32Array(0) };
+    }
+
+    prog(5);
+
+    const adaptiveBucket = Math.max(0.02, Math.min(0.1, 2.0 / Math.cbrt(n)));
+    const grid = new Map();
+    const positions = pointCloud.positions;
+
+    for (let i = 0; i < n; i++) {
+      const gx = Math.floor(positions[i * 3] / adaptiveBucket);
+      const gy = Math.floor(positions[i * 3 + 1] / adaptiveBucket);
+      const gz = Math.floor(positions[i * 3 + 2] / adaptiveBucket);
+      const key = `${gx},${gy},${gz}`;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    }
+
+    prog(25);
+
+    const indices = [];
+    const maxDist = adaptiveBucket * 2.0;
+    const maxDistSq = maxDist * maxDist;
+    const processed = new Set();
+    let bucketCount = 0;
+    const totalBuckets = grid.size;
+
+    for (const [key, bucket] of grid) {
+      const [gx, gy, gz] = key.split(',').map(Number);
+      const neighbors = [];
+
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dz = -1; dz <= 1; dz++) {
+            const nk = `${gx + dx},${gy + dy},${gz + dz}`;
+            if (grid.has(nk)) neighbors.push(...grid.get(nk));
+          }
+        }
+      }
+
+      for (const i of bucket) {
+        const nearest = [];
+        for (const j of neighbors) {
+          if (j <= i) continue;
+          const ddx = positions[j * 3] - positions[i * 3];
+          const ddy = positions[j * 3 + 1] - positions[i * 3 + 1];
+          const ddz = positions[j * 3 + 2] - positions[i * 3 + 2];
+          const distSq = ddx * ddx + ddy * ddy + ddz * ddz;
+          if (distSq < maxDistSq) {
+            nearest.push({ idx: j, dist: distSq });
+          }
+        }
+
+        nearest.sort((a, b) => a.dist - b.dist);
+        const top = nearest.slice(0, 8);
+
+        for (let a = 0; a < top.length; a++) {
+          for (let b = a + 1; b < top.length; b++) {
+            const triKey = [i, top[a].idx, top[b].idx].sort().join(',');
+            if (processed.has(triKey)) continue;
+            processed.add(triKey);
+
+            const j = top[a].idx;
+            const k = top[b].idx;
+            const edx = positions[j * 3] - positions[k * 3];
+            const edy = positions[j * 3 + 1] - positions[k * 3 + 1];
+            const edz = positions[j * 3 + 2] - positions[k * 3 + 2];
+            if (edx * edx + edy * edy + edz * edz < maxDistSq) {
+              indices.push(i, j, k);
+            }
+          }
+        }
+      }
+
+      bucketCount++;
+      if (bucketCount % 200 === 0) {
+        prog(25 + (bucketCount / totalBuckets) * 75);
+      }
+    }
+
+    prog(100);
+    return { indices: new Uint32Array(indices) };
+  }
+
   return {
     run,
+    runAI,
     cancel,
     getResult,
     exportOBJ,
     exportPLY,
   };
 })();
+
