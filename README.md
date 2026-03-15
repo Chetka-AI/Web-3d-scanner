@@ -17,11 +17,12 @@ Aplikacja webowa (PWA) do skanowania obiektów z kamery smartfona i generowania 
 
 ### Skanowanie na żywo (nowy moduł)
 - **Real-time scanning** — ciągłe przechwytywanie klatek z kamery
-- **Live depth estimation** — AI przetwarza każdą klatkę w locie
-- **Akumulacja chmury punktów** — punkty dodawane przyrostowo w czasie rzeczywistym
-- **Podgląd 3D PiP** — miniatura modelu 3D nakładana na obraz kamery
-- **Voxel deduplication** — hash-based siatka voxeli zapobiega duplikatom
-- **HUD** — FPS, liczba punktów, liczba klatek, status nagrywania
+- **Pose fusion** — IMU + tracking obrazu stabilizują pozycję kamery
+- **Keyframe integration** — tylko dobre klatki trafiają do modelu
+- **Confidence voxels** — voxel dostaje wsparcie / karę zamiast binarnego on/off
+- **World-space map** — punkty są akumulowane w stałym układzie odniesienia
+- **Podgląd 3D PiP** — miniatura mapy fusion nakładana na obraz kamery
+- **HUD** — FPS, dopasowania, keyframe'y, confidence mapy i status nagrywania
 
 ### Wspólne
 - **Podgląd kamery** — WebRTC, przełączanie przód/tył, orientacja urządzenia
@@ -80,7 +81,7 @@ Otwórz na telefonie: `http://<IP>:8000`
 │   ├── app.js               # Kontroler aplikacji, nawigacja
 │   ├── camera.js            # Moduł kamery (WebRTC)
 │   ├── processing.js        # Silnik rekonstrukcji 3D (AI + klasyczny)
-│   ├── realtime-scanner.js  # Skanowanie w czasie rzeczywistym
+│   ├── realtime-scanner-v2.js  # Stabilizowane skanowanie w czasie rzeczywistym
 │   └── viewer.js            # Podgląd 3D (Three.js)
 └── icons/
     ├── favicon.svg

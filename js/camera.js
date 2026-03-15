@@ -176,6 +176,8 @@ const CameraModule = (() => {
     clearPhotos,
     getOrientation,
     getAngleProgress,
+    startOrientation,
+    stopOrientation,
     isActive,
     MAX_PHOTOS,
   };
