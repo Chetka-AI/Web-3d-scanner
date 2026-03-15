@@ -116,6 +116,15 @@
     $('btnLiveToggle').addEventListener('click', toggleLiveScan);
     $('btnLiveClose').addEventListener('click', closeLiveScanning);
     $('btnLiveDone').addEventListener('click', finishLiveScanning);
+    $('btnLiveSettings').addEventListener('click', () => $('liveSettings').classList.toggle('hidden'));
+    $('btnCloseSettings').addEventListener('click', () => $('liveSettings').classList.add('hidden'));
+    $('btnResetSettings').addEventListener('click', () => {
+      RealtimeScanner.applyPreset('balanced');
+      syncSettingsUI();
+      toast('Parametry zresetowane', 'info');
+    });
+
+    initSettingsPanel();
 
     // Gallery tab
     btnClearGallery.addEventListener('click', clearGallery);
@@ -615,6 +624,83 @@
     $('liveEdges').querySelector('span').textContent = `${stats.edges || 0} kraw.`;
     $('liveCorners').querySelector('span').textContent = `${stats.corners || 0} narożn.`;
     $('liveVoxels').querySelector('span').textContent = `${(stats.points || 0).toLocaleString()} vox`;
+
+    const q = stats.quality || 0;
+    const fill = $('qualityFill');
+    const text = $('qualityText');
+    if (fill && text) {
+      fill.style.width = q + '%';
+      fill.className = 'quality-fill ' + (q < 30 ? 'low' : q < 60 ? 'med' : 'high');
+      text.textContent = q + '%';
+    }
+  }
+
+  /* ===== Settings Panel ===== */
+  function initSettingsPanel() {
+    document.querySelectorAll('.cfg-range').forEach(el => {
+      el.addEventListener('input', () => {
+        const key = el.dataset.key;
+        let val = parseFloat(el.value);
+        RealtimeScanner.set(key, val);
+        const disp = document.querySelector(`[data-val="${key}"]`);
+        if (disp) disp.textContent = val;
+      });
+    });
+
+    document.querySelectorAll('.cfg-toggle').forEach(el => {
+      el.addEventListener('change', () => {
+        RealtimeScanner.set(el.dataset.key, el.checked);
+      });
+    });
+
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        RealtimeScanner.applyPreset(btn.dataset.preset);
+        syncSettingsUI();
+      });
+    });
+
+    document.querySelectorAll('.sil-mode-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.sil-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        RealtimeScanner.set('silhouetteMode', btn.dataset.sil);
+      });
+    });
+
+    document.querySelectorAll('.morph-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.morph-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        RealtimeScanner.set('morphType', btn.dataset.morph);
+      });
+    });
+
+    syncSettingsUI();
+  }
+
+  function syncSettingsUI() {
+    const cfg = RealtimeScanner.getAll();
+    document.querySelectorAll('.cfg-range').forEach(el => {
+      const key = el.dataset.key;
+      if (key in cfg) {
+        el.value = cfg[key];
+        const disp = document.querySelector(`[data-val="${key}"]`);
+        if (disp) disp.textContent = cfg[key];
+      }
+    });
+    document.querySelectorAll('.cfg-toggle').forEach(el => {
+      const key = el.dataset.key;
+      if (key in cfg) el.checked = cfg[key];
+    });
+    document.querySelectorAll('.morph-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.morph === cfg.morphType);
+    });
+    document.querySelectorAll('.sil-mode-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.sil === cfg.silhouetteMode);
+    });
   }
 
   function updateLiveStatus(status) {

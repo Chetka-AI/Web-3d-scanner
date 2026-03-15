@@ -252,7 +252,179 @@
             </div>
             <div id="liveStatusBadge" class="live-status-badge">Gotowy</div>
             <div id="liveRecDot" class="live-rec-dot hidden"></div>
+            <div class="live-quality" id="liveQuality">
+              <div class="quality-bar"><div class="quality-fill" id="qualityFill"></div></div>
+              <span id="qualityText">0%</span>
+            </div>
           </div>
+
+          <!-- Settings bottom sheet -->
+          <div id="liveSettings" class="live-settings hidden">
+            <div class="settings-handle" id="settingsHandle"></div>
+            <div class="settings-header">
+              <h3>Ustawienia zaawansowane</h3>
+              <button id="btnCloseSettings" class="btn-circle btn-circle-xs">
+                <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <div class="settings-scroll">
+
+              <div class="settings-group">
+                <div class="settings-group-title">Profil</div>
+                <div class="preset-row">
+                  <button class="preset-btn" data-preset="fast">Szybki</button>
+                  <button class="preset-btn active" data-preset="balanced">Zbalans.</button>
+                  <button class="preset-btn" data-preset="quality">Jakość</button>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Detekcja krawędzi</div>
+                <div class="setting-row">
+                  <label>Próg dolny (Canny)</label>
+                  <input type="range" min="5" max="120" step="1" data-key="cannyLo" class="cfg-range">
+                  <span class="setting-val" data-val="cannyLo"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Próg górny (Canny)</label>
+                  <input type="range" min="20" max="250" step="1" data-key="cannyHi" class="cfg-range">
+                  <span class="setting-val" data-val="cannyHi"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Rozmycie (kernel)</label>
+                  <input type="range" min="0" max="2" step="1" data-key="blurRadius" class="cfg-range">
+                  <span class="setting-val" data-val="blurRadius"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Wyostrzanie</label>
+                  <label class="toggle-switch toggle-sm"><input type="checkbox" data-key="sharpen" class="cfg-toggle"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="setting-row">
+                  <label>Siła wyostrzania</label>
+                  <input type="range" min="0.1" max="1.5" step="0.1" data-key="sharpenAmount" class="cfg-range">
+                  <span class="setting-val" data-val="sharpenAmount"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Geometria</div>
+                <div class="setting-row">
+                  <label>Min. długość linii</label>
+                  <input type="range" min="4" max="40" step="1" data-key="minLineLen" class="cfg-range">
+                  <span class="setting-val" data-val="minLineLen"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Odl. narożnika (px)</label>
+                  <input type="range" min="3" max="20" step="1" data-key="cornerDist" class="cfg-range">
+                  <span class="setting-val" data-val="cornerDist"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Upraszczanie (ε)</label>
+                  <input type="range" min="1" max="8" step="0.5" data-key="dpEpsilon" class="cfg-range">
+                  <span class="setting-val" data-val="dpEpsilon"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Sylwetka</div>
+                <div class="setting-row">
+                  <label>Tryb progu</label>
+                  <div class="preset-row">
+                    <button class="sil-mode-btn active" data-sil="auto">Auto (Otsu)</button>
+                    <button class="sil-mode-btn" data-sil="manual">Ręczny</button>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <label>Próg ręczny</label>
+                  <input type="range" min="10" max="245" step="1" data-key="manualThreshold" class="cfg-range">
+                  <span class="setting-val" data-val="manualThreshold"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Odwróć sylwetkę</label>
+                  <label class="toggle-switch toggle-sm"><input type="checkbox" data-key="invertSilhouette" class="cfg-toggle"><span class="toggle-slider"></span></label>
+                </div>
+                <div class="setting-row">
+                  <label>Morfologia</label>
+                  <div class="preset-row">
+                    <button class="morph-btn" data-morph="none">Brak</button>
+                    <button class="morph-btn" data-morph="open">Open</button>
+                    <button class="morph-btn active" data-morph="close">Close</button>
+                    <button class="morph-btn" data-morph="dilate">Dilate</button>
+                    <button class="morph-btn" data-morph="erode">Erode</button>
+                  </div>
+                </div>
+                <div class="setting-row">
+                  <label>Iteracje morfologii</label>
+                  <input type="range" min="0" max="5" step="1" data-key="morphIterations" class="cfg-range">
+                  <span class="setting-val" data-val="morphIterations"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Visual Hull</div>
+                <div class="setting-row">
+                  <label>Rozdzielczość voxeli</label>
+                  <input type="range" min="16" max="80" step="8" data-key="voxelRes" class="cfg-range">
+                  <span class="setting-val" data-val="voxelRes"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Rozmiar świata</label>
+                  <input type="range" min="0.5" max="4" step="0.1" data-key="voxelWorld" class="cfg-range">
+                  <span class="setting-val" data-val="voxelWorld"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Odl. kamery</label>
+                  <input type="range" min="1" max="5" step="0.1" data-key="cameraR" class="cfg-range">
+                  <span class="setting-val" data-val="cameraR"></span>
+                </div>
+                <div class="setting-row">
+                  <label>FOV (stopnie)</label>
+                  <input type="range" min="30" max="120" step="5" data-key="fovDeg" class="cfg-range">
+                  <span class="setting-val" data-val="fovDeg"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Wizualizacja overlay</div>
+                <div class="setting-row"><label>Krawędzie</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showEdges" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row"><label>Linie</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showLines" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row"><label>Narożniki</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showCorners" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row"><label>Kąty</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showAngles" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row"><label>Sylwetka</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showSilhouette" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row">
+                  <label>Przezroczystość</label>
+                  <input type="range" min="0.05" max="0.8" step="0.05" data-key="overlayOpacity" class="cfg-range">
+                  <span class="setting-val" data-val="overlayOpacity"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Przetwarzanie</div>
+                <div class="setting-row">
+                  <label>Rozm. klatki (px)</label>
+                  <input type="range" min="120" max="400" step="20" data-key="procSize" class="cfg-range">
+                  <span class="setting-val" data-val="procSize"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Min. interwał (ms)</label>
+                  <input type="range" min="20" max="200" step="10" data-key="minFrameMs" class="cfg-range">
+                  <span class="setting-val" data-val="minFrameMs"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Stabilizacja orientacji</label>
+                  <label class="toggle-switch toggle-sm"><input type="checkbox" data-key="smoothOrientation" class="cfg-toggle" checked><span class="toggle-slider"></span></label>
+                </div>
+                <div class="setting-row">
+                  <label>Próg ruchu</label>
+                  <input type="range" min="0" max="0.05" step="0.002" data-key="motionThreshold" class="cfg-range">
+                  <span class="setting-val" data-val="motionThreshold"></span>
+                </div>
+              </div>
+
+              <button id="btnResetSettings" class="btn btn-outline btn-sm" style="width:100%;margin-top:8px">Resetuj do domyślnych</button>
+            </div>
+          </div>
+
           <div class="live-controls">
             <button id="btnLiveClose" class="btn-circle btn-circle-sm" title="Zamknij">
               <svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -262,6 +434,9 @@
                 <svg id="liveIconPlay" viewBox="0 0 24 24" fill="currentColor" width="24" height="24"><path d="M8 5v14l11-7z"/></svg>
                 <svg id="liveIconPause" viewBox="0 0 24 24" fill="currentColor" width="24" height="24" class="hidden"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
               </div>
+            </button>
+            <button id="btnLiveSettings" class="btn-circle btn-circle-sm" title="Ustawienia">
+              <svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" stroke="currentColor" stroke-width="1.5"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" stroke="currentColor" stroke-width="1.5"/></svg>
             </button>
             <button id="btnLiveDone" class="btn-circle btn-circle-sm" title="Zakończ i zobacz model">
               <svg viewBox="0 0 24 24" fill="none" width="20" height="20"><path d="M20 6L9 17l-5-5" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
