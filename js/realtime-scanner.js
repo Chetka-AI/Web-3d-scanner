@@ -49,12 +49,20 @@ const RealtimeScanner = (() => {
     motionThreshold: 0.005,
     smoothOrientation: true,
     smoothFactor:   0.3,
+
+    syncCamera:     true,
+    showWireframe:  true,
+    showVoxels:     true,
+    descRadius:     3,
+    matchThreshold: 0.55,
+    minAngleDiff:   0.15,
+    maxHistory:     6,
   };
 
   const PRESETS = {
-    fast:     { procSize:180, cannyLo:40, cannyHi:100, blurRadius:1, sharpen:false, minLineLen:16, voxelRes:32, minFrameMs:30, morphType:'none', morphIterations:0, dpEpsilon:4 },
-    balanced: { procSize:240, cannyLo:30, cannyHi:80,  blurRadius:1, sharpen:false, minLineLen:12, voxelRes:48, minFrameMs:50, morphType:'close', morphIterations:1, dpEpsilon:3 },
-    quality:  { procSize:320, cannyLo:20, cannyHi:65,  blurRadius:2, sharpen:true,  minLineLen:8,  voxelRes:64, minFrameMs:80, morphType:'close', morphIterations:2, dpEpsilon:2 },
+    fast:     { procSize:180, cannyLo:40, cannyHi:100, blurRadius:1, sharpen:false, minLineLen:16, voxelRes:32, minFrameMs:30, morphType:'none', morphIterations:0, dpEpsilon:4, maxHistory:4 },
+    balanced: { procSize:240, cannyLo:30, cannyHi:80,  blurRadius:1, sharpen:false, minLineLen:12, voxelRes:48, minFrameMs:50, morphType:'close', morphIterations:1, dpEpsilon:3, maxHistory:6 },
+    quality:  { procSize:320, cannyLo:20, cannyHi:65,  blurRadius:2, sharpen:true,  minLineLen:8,  voxelRes:64, minFrameMs:80, morphType:'close', morphIterations:2, dpEpsilon:2, maxHistory:8 },
   };
 
   function set(key, value) { if (key in cfg) cfg[key] = value; }
@@ -82,6 +90,13 @@ const RealtimeScanner = (() => {
 
   let smoothYaw = 0, smoothPitch = 0;
   let lastYaw = null;
+
+  let vertexHistory = [];
+  let vertices3D = [];
+  let edges3D = new Set();
+  let wireVertexObj = null, wireEdgeObj = null;
+  let wireframeDirty = false;
+  let liveOrientation = { yaw: 0, pitch: 0 };
 
   /* ============== Public API ============== */
 
@@ -119,6 +134,8 @@ const RealtimeScanner = (() => {
     scanning = true; paused = false; processing = false;
     frameCount = 0; edgeCount = 0; cornerCount = 0; quality = 0;
     smoothYaw = 0; smoothPitch = 0; lastYaw = null;
+    vertexHistory = []; vertices3D = []; edges3D = new Set();
+    wireframeDirty = false;
     initVoxelGrid();
     clear3DScene();
     startRenderLoop();
@@ -159,7 +176,12 @@ const RealtimeScanner = (() => {
   }
 
   function getStats() {
-    return { frames: frameCount, points: totalVoxels, edges: edgeCount, corners: cornerCount, fps, quality, scanning, paused };
+    return {
+      frames: frameCount, points: totalVoxels,
+      edges: edgeCount, corners: cornerCount,
+      verts3D: vertices3D.length, edges3D: edges3D.size,
+      fps, quality, scanning, paused,
+    };
   }
   function isScanning() { return scanning; }
   function isPaused()   { return paused; }
@@ -444,6 +466,146 @@ const RealtimeScanner = (() => {
       }
   }
 
+  /* ============== Vertex Tracking & Wireframe ============== */
+
+  function extractDescriptor(gray, w, h, cx, cy) {
+    const r = cfg.descRadius, size = (2*r+1)*(2*r+1);
+    const d = new Float32Array(size);
+    let mean = 0, n = 0;
+    for (let dy=-r; dy<=r; dy++)
+      for (let dx=-r; dx<=r; dx++) {
+        const px=cx+dx, py=cy+dy;
+        d[n] = (px>=0&&px<w&&py>=0&&py<h) ? gray[py*w+px] : 0;
+        mean += d[n]; n++;
+      }
+    mean /= n;
+    let norm = 0;
+    for (let i=0; i<d.length; i++) { d[i]-=mean; norm+=d[i]*d[i]; }
+    norm = Math.sqrt(norm)||1;
+    for (let i=0; i<d.length; i++) d[i]/=norm;
+    return d;
+  }
+
+  function ncc(a, b) {
+    let s=0; for (let i=0; i<a.length; i++) s+=a[i]*b[i]; return s;
+  }
+
+  function processVertexTracking(corners, lines, gray, w, h, angle, imgData) {
+    for (const c of corners) {
+      c.descriptor = extractDescriptor(gray, w, h, Math.round(c.x), Math.round(c.y));
+      c.v3dIdx = -1;
+    }
+
+    const adjacency = buildAdjacency(corners, lines);
+
+    for (const hist of vertexHistory) {
+      const angleDiff = Math.abs(angle - hist.angle);
+      if (angleDiff < cfg.minAngleDiff) continue;
+
+      for (const cur of corners) {
+        if (cur.v3dIdx >= 0) continue;
+        let bestScore = cfg.matchThreshold, bestHist = null;
+        for (const hv of hist.vertices) {
+          const score = ncc(cur.descriptor, hv.descriptor);
+          if (score > bestScore) { bestScore = score; bestHist = hv; }
+        }
+        if (!bestHist) continue;
+
+        const pos = triangulate2Views(cur.x, cur.y, angle, bestHist.x, bestHist.y, hist.angle, w, h);
+        if (!pos) continue;
+
+        const dist = Math.sqrt(pos[0]*pos[0]+pos[1]*pos[1]+pos[2]*pos[2]);
+        if (dist > cfg.voxelWorld) continue;
+
+        const px = Math.round(cur.x), py = Math.round(cur.y);
+        const pi = (py*w+px)*4;
+        const col = [imgData.data[pi]/255, imgData.data[pi+1]/255, imgData.data[pi+2]/255];
+
+        if (bestHist.v3dIdx >= 0) {
+          const v = vertices3D[bestHist.v3dIdx];
+          const f = 1 / (v.confidence + 1);
+          v.pos[0] += (pos[0]-v.pos[0])*f;
+          v.pos[1] += (pos[1]-v.pos[1])*f;
+          v.pos[2] += (pos[2]-v.pos[2])*f;
+          v.confidence++;
+          cur.v3dIdx = bestHist.v3dIdx;
+        } else {
+          cur.v3dIdx = vertices3D.length;
+          bestHist.v3dIdx = cur.v3dIdx;
+          vertices3D.push({ pos, col, confidence: 1 });
+        }
+        wireframeDirty = true;
+      }
+    }
+
+    for (let i=0; i<corners.length; i++) {
+      if (corners[i].v3dIdx < 0) continue;
+      const neighbors = adjacency.get(i);
+      if (!neighbors) continue;
+      for (const j of neighbors) {
+        if (corners[j].v3dIdx < 0) continue;
+        const a = Math.min(corners[i].v3dIdx, corners[j].v3dIdx);
+        const b = Math.max(corners[i].v3dIdx, corners[j].v3dIdx);
+        const key = a * 100000 + b;
+        if (!edges3D.has(key)) { edges3D.add(key); wireframeDirty = true; }
+      }
+    }
+
+    vertexHistory.push({ vertices: corners, angle });
+    if (vertexHistory.length > cfg.maxHistory) vertexHistory.shift();
+  }
+
+  function buildAdjacency(corners, lines) {
+    const adj = new Map();
+    for (let i=0; i<corners.length; i++) adj.set(i, new Set());
+    for (const l of lines) {
+      let ci=-1, cj=-1;
+      for (let k=0; k<corners.length; k++) {
+        const c = corners[k];
+        const d1 = Math.sqrt((c.x-l.x1)**2+(c.y-l.y1)**2);
+        const d2 = Math.sqrt((c.x-l.x2)**2+(c.y-l.y2)**2);
+        if (d1 < cfg.cornerDist*2.5) ci = k;
+        if (d2 < cfg.cornerDist*2.5) cj = k;
+      }
+      if (ci>=0 && cj>=0 && ci!==cj) { adj.get(ci).add(cj); adj.get(cj).add(ci); }
+    }
+    return adj;
+  }
+
+  function triangulate2Views(px1, py1, a1, px2, py2, a2, w, h) {
+    const fov = cfg.fovDeg*Math.PI/180;
+    const fx = w/(2*Math.tan(fov/2));
+    const cxI=w/2, cyI=h/2, R=cfg.cameraR;
+
+    const cam1 = [R*Math.sin(a1), 0, R*Math.cos(a1)];
+    const cam2 = [R*Math.sin(a2), 0, R*Math.cos(a2)];
+
+    const r1c = [(px1-cxI)/fx, -(py1-cyI)/fx, -1];
+    const c1=Math.cos(a1), s1=Math.sin(a1);
+    const d1 = normVec([r1c[0]*c1-r1c[2]*s1, r1c[1], r1c[0]*s1+r1c[2]*c1]);
+
+    const r2c = [(px2-cxI)/fx, -(py2-cyI)/fx, -1];
+    const c2=Math.cos(a2), s2=Math.sin(a2);
+    const d2 = normVec([r2c[0]*c2-r2c[2]*s2, r2c[1], r2c[0]*s2+r2c[2]*c2]);
+
+    const w0 = [cam1[0]-cam2[0], cam1[1]-cam2[1], cam1[2]-cam2[2]];
+    const a=dot(d1,d1), b=dot(d1,d2), c=dot(d2,d2), d=dot(d1,w0), e=dot(d2,w0);
+    const den = a*c-b*b;
+    if (Math.abs(den)<1e-8) return null;
+    const sc = (b*e-c*d)/den, tc = (a*e-b*d)/den;
+    const p1 = [cam1[0]+sc*d1[0], cam1[1]+sc*d1[1], cam1[2]+sc*d1[2]];
+    const p2 = [cam2[0]+tc*d2[0], cam2[1]+tc*d2[1], cam2[2]+tc*d2[2]];
+    const err = Math.sqrt((p1[0]-p2[0])**2+(p1[1]-p2[1])**2+(p1[2]-p2[2])**2);
+    if (err > 0.8) return null;
+    return [(p1[0]+p2[0])/2, (p1[1]+p2[1])/2, (p1[2]+p2[2])/2];
+  }
+
+  function normVec(v) {
+    const l=Math.sqrt(v[0]*v[0]+v[1]*v[1]+v[2]*v[2])||1;
+    return [v[0]/l,v[1]/l,v[2]/l];
+  }
+  function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
+
   /* ============== Visual Hull ============== */
 
   function initVoxelGrid() {
@@ -627,23 +789,75 @@ const RealtimeScanner = (() => {
     if (renderFrame) return;
     function loop() {
       renderFrame = requestAnimationFrame(loop);
-      prevAngle += 0.006;
-      cam3d.position.set(Math.sin(prevAngle)*1.8, 0.6, Math.cos(prevAngle)*1.8);
+
+      if (cfg.syncCamera && scanning) {
+        const r = cfg.cameraR * 0.7;
+        cam3d.position.set(
+          r * Math.sin(liveOrientation.yaw),
+          0.4 + Math.sin(liveOrientation.pitch) * 0.4,
+          r * Math.cos(liveOrientation.yaw)
+        );
+      } else {
+        prevAngle += 0.006;
+        cam3d.position.set(Math.sin(prevAngle)*1.8, 0.6, Math.cos(prevAngle)*1.8);
+      }
       cam3d.lookAt(0,0,0);
+
       const p = previewCanvas.parentElement;
       if (p && p.clientWidth>0) {
         renderer.setSize(p.clientWidth, p.clientHeight);
         cam3d.aspect = p.clientWidth/p.clientHeight;
         cam3d.updateProjectionMatrix();
       }
-      update3DPreview();
+      if (cfg.showVoxels) update3DPreview();
+      if (cfg.showWireframe) updateWireframePreview();
       renderer.render(scene, cam3d);
     }
     loop();
   }
   function stopRenderLoop() { if (renderFrame) { cancelAnimationFrame(renderFrame); renderFrame=null; } }
+  function updateWireframePreview() {
+    if (!wireframeDirty) return;
+    wireframeDirty = false;
+
+    if (wireVertexObj) { scene.remove(wireVertexObj); wireVertexObj.geometry.dispose(); wireVertexObj.material.dispose(); wireVertexObj=null; }
+    if (wireEdgeObj)   { scene.remove(wireEdgeObj);   wireEdgeObj.geometry.dispose();   wireEdgeObj.material.dispose();   wireEdgeObj=null; }
+
+    if (!vertices3D.length) return;
+
+    const vPos=[], vCol=[];
+    for (const v of vertices3D) {
+      vPos.push(v.pos[0], v.pos[1], v.pos[2]);
+      vCol.push(v.col[0], v.col[1], v.col[2]);
+    }
+    const vGeo = new THREE.BufferGeometry();
+    vGeo.setAttribute('position', new THREE.Float32BufferAttribute(vPos,3));
+    vGeo.setAttribute('color', new THREE.Float32BufferAttribute(vCol,3));
+    wireVertexObj = new THREE.Points(vGeo, new THREE.PointsMaterial({ size:0.035, vertexColors:true, sizeAttenuation:true }));
+    scene.add(wireVertexObj);
+
+    if (edges3D.size) {
+      const ePos=[];
+      for (const key of edges3D) {
+        const a = Math.floor(key/100000), b = key%100000;
+        if (a<vertices3D.length && b<vertices3D.length) {
+          ePos.push(vertices3D[a].pos[0],vertices3D[a].pos[1],vertices3D[a].pos[2]);
+          ePos.push(vertices3D[b].pos[0],vertices3D[b].pos[1],vertices3D[b].pos[2]);
+        }
+      }
+      if (ePos.length) {
+        const eGeo = new THREE.BufferGeometry();
+        eGeo.setAttribute('position', new THREE.Float32BufferAttribute(ePos,3));
+        wireEdgeObj = new THREE.LineSegments(eGeo, new THREE.LineBasicMaterial({ color:0x00d4ff, transparent:true, opacity:0.7 }));
+        scene.add(wireEdgeObj);
+      }
+    }
+  }
+
   function clear3DScene() {
-    if (voxelMesh) { scene.remove(voxelMesh); voxelMesh.geometry.dispose(); voxelMesh.material.dispose(); voxelMesh=null; }
+    if (voxelMesh)     { scene.remove(voxelMesh);     voxelMesh.geometry.dispose();     voxelMesh.material.dispose();     voxelMesh=null; }
+    if (wireVertexObj) { scene.remove(wireVertexObj); wireVertexObj.geometry.dispose(); wireVertexObj.material.dispose(); wireVertexObj=null; }
+    if (wireEdgeObj)   { scene.remove(wireEdgeObj);   wireEdgeObj.geometry.dispose();   wireEdgeObj.material.dispose();   wireEdgeObj=null; }
   }
 
   /* ============== Frame Loop ============== */
@@ -682,6 +896,9 @@ const RealtimeScanner = (() => {
       quality = computeQuality(edgeMap, sil, pw, ph);
 
       const ori = getSmoothedOrientation();
+      liveOrientation = ori;
+
+      processVertexTracking(corners, lines, gray, pw, ph, ori.yaw, imgData);
 
       if (lastYaw !== null) {
         const delta = Math.abs(ori.yaw - lastYaw);

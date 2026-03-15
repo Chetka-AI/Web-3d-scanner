@@ -623,7 +623,7 @@
     $('liveFps').querySelector('span').textContent = `${stats.fps} FPS`;
     $('liveEdges').querySelector('span').textContent = `${stats.edges || 0} kraw.`;
     $('liveCorners').querySelector('span').textContent = `${stats.corners || 0} narożn.`;
-    $('liveVoxels').querySelector('span').textContent = `${(stats.points || 0).toLocaleString()} vox`;
+    $('liveVerts3D').querySelector('span').textContent = `${stats.verts3D || 0}v / ${stats.edges3D || 0}e`;
 
     const q = stats.quality || 0;
     const fill = $('qualityFill');
