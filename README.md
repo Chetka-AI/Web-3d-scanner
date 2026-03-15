@@ -15,6 +15,14 @@ Aplikacja webowa (PWA) do skanowania obiektów z kamery smartfona i generowania 
 - **Dopasowywanie NCC** — sparowane cechy między widokami
 - **Triangulacja geometryczna** — punkty 3D z par dopasowanych cech
 
+### Skanowanie na żywo (nowy moduł)
+- **Real-time scanning** — ciągłe przechwytywanie klatek z kamery
+- **Live depth estimation** — AI przetwarza każdą klatkę w locie
+- **Akumulacja chmury punktów** — punkty dodawane przyrostowo w czasie rzeczywistym
+- **Podgląd 3D PiP** — miniatura modelu 3D nakładana na obraz kamery
+- **Voxel deduplication** — hash-based siatka voxeli zapobiega duplikatom
+- **HUD** — FPS, liczba punktów, liczba klatek, status nagrywania
+
 ### Wspólne
 - **Podgląd kamery** — WebRTC, przełączanie przód/tył, orientacja urządzenia
 - **Galeria** — miniaturki z kątami, podgląd, usuwanie
@@ -68,11 +76,12 @@ Otwórz na telefonie: `http://<IP>:8000`
 ├── css/
 │   └── style.css       # Style (mobile-first, dark theme)
 ├── js/
-│   ├── ai-engine.js    # Moduł AI (Transformers.js, Depth Anything V2)
-│   ├── app.js          # Kontroler aplikacji, nawigacja
-│   ├── camera.js       # Moduł kamery (WebRTC)
-│   ├── processing.js   # Silnik rekonstrukcji 3D (AI + klasyczny)
-│   └── viewer.js       # Podgląd 3D (Three.js)
+│   ├── ai-engine.js         # Moduł AI (Transformers.js, Depth Anything V2)
+│   ├── app.js               # Kontroler aplikacji, nawigacja
+│   ├── camera.js            # Moduł kamery (WebRTC)
+│   ├── processing.js        # Silnik rekonstrukcji 3D (AI + klasyczny)
+│   ├── realtime-scanner.js  # Skanowanie w czasie rzeczywistym
+│   └── viewer.js            # Podgląd 3D (Three.js)
 └── icons/
     ├── favicon.svg
     ├── icon-192.png
