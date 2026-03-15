@@ -623,7 +623,9 @@
     $('liveFps').querySelector('span').textContent = `${stats.fps} FPS`;
     $('liveEdges').querySelector('span').textContent = `${stats.edges || 0} kraw.`;
     $('liveCorners').querySelector('span').textContent = `${stats.corners || 0} narożn.`;
-    $('liveVerts3D').querySelector('span').textContent = `${stats.verts3D || 0}v / ${stats.edges3D || 0}e`;
+    $('liveVerts3D').querySelector('span').textContent = `${stats.verts3D || 0}v / ${stats.edges3D || 0}e / ${stats.surfels || 0}s`;
+    $('liveTrack').querySelector('span').textContent = `${stats.matches || 0} match / ${stats.keyframes || 0} KF / ${stats.poseLock || 0}%`;
+    $('liveMap').querySelector('span').textContent = `${(stats.points || 0).toLocaleString()} pkt / ${stats.mapConfidence || 0}%`;
 
     const q = stats.quality || 0;
     const fill = $('qualityFill');
@@ -738,6 +740,15 @@
     $('liveRecDot').classList.add('hidden');
     $('liveStatusBadge').textContent = 'Gotowy';
     $('liveStatusBadge').className = 'live-status-badge';
+    $('liveFps').querySelector('span').textContent = '— FPS';
+    $('liveEdges').querySelector('span').textContent = '0 kraw.';
+    $('liveCorners').querySelector('span').textContent = '0 narożn.';
+    $('liveVerts3D').querySelector('span').textContent = '0v / 0e / 0s';
+    $('liveTrack').querySelector('span').textContent = '0 match / 0 KF / 0%';
+    $('liveMap').querySelector('span').textContent = '0 pkt / 0%';
+    $('qualityFill').style.width = '0%';
+    $('qualityFill').className = 'quality-fill';
+    $('qualityText').textContent = '0%';
   }
 
   function startTipsCarousel() {
