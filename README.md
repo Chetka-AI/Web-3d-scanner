@@ -18,8 +18,10 @@ Aplikacja webowa (PWA) do skanowania obiektów z kamery smartfona i generowania 
 ### Skanowanie na żywo (nowy moduł)
 - **Real-time scanning** — ciągłe przechwytywanie klatek z kamery
 - **Pose fusion** — IMU + tracking obrazu stabilizują pozycję kamery
+- **Pose lock / local refinement** — pozycja kamery jest dopasowywana do już zbudowanej mapy
 - **Keyframe integration** — tylko dobre klatki trafiają do modelu
 - **Confidence voxels** — voxel dostaje wsparcie / karę zamiast binarnego on/off
+- **Surfel fusion** — stabilne punkty-kotwice zagęszczają i porządkują geometrię
 - **World-space map** — punkty są akumulowane w stałym układzie odniesienia
 - **Podgląd 3D PiP** — miniatura mapy fusion nakładana na obraz kamery
 - **HUD** — FPS, dopasowania, keyframe'y, confidence mapy i status nagrywania

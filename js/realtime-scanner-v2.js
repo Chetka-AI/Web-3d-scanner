@@ -46,15 +46,26 @@ const RealtimeScanner = (() => {
     poseAssist: true,
     poseAssistGain: 0.65,
     targetCoverage: 0.22,
+    poseRefineEnabled: true,
+    poseRefineIterations: 2,
+    poseRefineSamples: 180,
+    poseRefineStepYaw: 0.035,
+    poseRefineStepOffset: 0.025,
+    poseRefineStepRadius: 0.04,
+    poseRefineMapWeight: 0.95,
 
     keyframeMinQuality: 42,
     keyframeMinRotation: 0.08,
     keyframeMinTranslation: 0.04,
     keyframeMinCentroid: 0.035,
+    reprojectionThresholdPx: 12,
+    minBaselineDeg: 1.6,
+    vertexMergeDist: 0.05,
 
     syncCamera: true,
     showWireframe: true,
     showVoxels: true,
+    showSurfels: true,
     renderBudget: 22000,
 
     descRadius: 3,
@@ -67,6 +78,8 @@ const RealtimeScanner = (() => {
     voxelSupportThreshold: 1.0,
     voxelRemoveThreshold: 1.4,
     voxelMinObservations: 2,
+    surfelCell: 0.028,
+    surfelMinConfidence: 2,
   };
 
   const PRESETS = {
@@ -84,10 +97,15 @@ const RealtimeScanner = (() => {
       dpEpsilon: 4,
       maxHistory: 5,
       renderBudget: 14000,
+      poseRefineIterations: 1,
+      poseRefineSamples: 96,
       keyframeMinQuality: 48,
       keyframeMinRotation: 0.11,
       keyframeMinTranslation: 0.06,
       voxelMinObservations: 2,
+      reprojectionThresholdPx: 15,
+      minBaselineDeg: 2.1,
+      surfelMinConfidence: 2,
     },
     balanced: {
       procSize: 240,
@@ -103,10 +121,15 @@ const RealtimeScanner = (() => {
       dpEpsilon: 3,
       maxHistory: 8,
       renderBudget: 22000,
+      poseRefineIterations: 2,
+      poseRefineSamples: 180,
       keyframeMinQuality: 42,
       keyframeMinRotation: 0.08,
       keyframeMinTranslation: 0.04,
       voxelMinObservations: 2,
+      reprojectionThresholdPx: 12,
+      minBaselineDeg: 1.6,
+      surfelMinConfidence: 2,
     },
     quality: {
       procSize: 320,
@@ -123,10 +146,15 @@ const RealtimeScanner = (() => {
       dpEpsilon: 2,
       maxHistory: 10,
       renderBudget: 36000,
+      poseRefineIterations: 3,
+      poseRefineSamples: 260,
       keyframeMinQuality: 36,
       keyframeMinRotation: 0.06,
       keyframeMinTranslation: 0.03,
       voxelMinObservations: 3,
+      reprojectionThresholdPx: 10,
+      minBaselineDeg: 1.1,
+      surfelMinConfidence: 3,
     },
   };
 
@@ -172,6 +200,7 @@ const RealtimeScanner = (() => {
   let keyframeCount = 0;
   let trackingMatches = 0;
   let liveOrientation = null;
+  let poseLock = 0;
 
   let sensorYaw = 0;
   let sensorPitch = 0;
@@ -187,8 +216,11 @@ const RealtimeScanner = (() => {
   let vertexHistory = [];
   let vertices3D = [];
   let edges3D = new Set();
+  let surfels = [];
+  let surfelIndex = new Map();
   let wireVertexObj = null;
   let wireEdgeObj = null;
+  let surfelObj = null;
   let wireframeDirty = false;
 
   let onStatsUpdate = null;
@@ -200,6 +232,18 @@ const RealtimeScanner = (() => {
     if (scanning && ['voxelRes', 'voxelWorld', 'cameraR'].includes(key)) {
       initVoxelGrid();
       resetTrackingState();
+      wireframeDirty = true;
+      voxelsDirty = true;
+    }
+    if (['showWireframe', 'showSurfels', 'surfelMinConfidence'].includes(key)) {
+      wireframeDirty = true;
+      voxelsDirty = true;
+    }
+    if (['voxelSupportThreshold', 'voxelMinObservations', 'renderBudget'].includes(key)) {
+      voxelsDirty = true;
+    }
+    if (key === 'surfelCell' && scanning) {
+      rebuildSurfelsFromVertices();
       wireframeDirty = true;
       voxelsDirty = true;
     }
@@ -334,6 +378,8 @@ const RealtimeScanner = (() => {
     voxelOutside = null;
     voxelColorAcc = null;
     voxelColorWeight = null;
+    surfels = [];
+    surfelIndex = new Map();
   }
 
   function isScanning() {
@@ -349,7 +395,7 @@ const RealtimeScanner = (() => {
   }
 
   function getPointCloud() {
-    const entries = collectRenderableVoxels(Infinity);
+    const entries = collectRenderableMapEntries(Infinity);
     const positions = new Float32Array(entries.length * 3);
     const colors = new Float32Array(entries.length * 3);
     for (let i = 0; i < entries.length; i++) {
@@ -379,6 +425,8 @@ const RealtimeScanner = (() => {
       keyframes: keyframeCount,
       matches: trackingMatches,
       mapConfidence: Math.round(previewConfidence * 100),
+      poseLock: Math.round(poseLock * 100),
+      surfels: surfels.length,
     };
   }
 
@@ -404,6 +452,9 @@ const RealtimeScanner = (() => {
     vertexHistory = [];
     vertices3D = [];
     edges3D = new Set();
+    surfels = [];
+    surfelIndex = new Map();
+    poseLock = 0;
     wireframeDirty = true;
     liveOrientation = buildPose(0, 0, cfg.cameraR, 0, 0);
   }
@@ -1047,6 +1098,8 @@ const RealtimeScanner = (() => {
       yaw,
       pitch,
       radius,
+      offsetX,
+      offsetY,
       target: [0, 0, 0],
       position: [
         Math.sin(yaw) * radius + offsetX,
@@ -1088,9 +1141,19 @@ const RealtimeScanner = (() => {
       0,
       1
     );
-    const pose = buildPose(sensor.yaw + poseState.yawBias, sensor.pitch + poseState.pitchBias, poseState.radius, poseState.offsetX, poseState.offsetY);
+    let pose = buildPose(sensor.yaw + poseState.yawBias, sensor.pitch + poseState.pitchBias, poseState.radius, poseState.offsetX, poseState.offsetY);
     pose.confidence = poseState.confidence;
-    return { pose, visual };
+    const refine = refinePoseAgainstMap(pose, silStats, w, h);
+    pose = refine.pose;
+    poseLock = refine.lock;
+    poseState.yawBias = mix(poseState.yawBias, pose.yaw - sensor.yaw, 0.16);
+    poseState.pitchBias = mix(poseState.pitchBias, pose.pitch - sensor.pitch, 0.16);
+    poseState.radius = mix(poseState.radius, pose.radius, 0.16);
+    poseState.offsetX = mix(poseState.offsetX, pose.offsetX, 0.16);
+    poseState.offsetY = mix(poseState.offsetY, pose.offsetY, 0.16);
+    poseState.confidence = clamp(poseState.confidence * 0.68 + refine.lock * 0.32, 0, 1);
+    pose.confidence = poseState.confidence;
+    return { pose, visual, refine };
   }
 
   function shouldIntegrateKeyframe(pose, silStats, frameQuality) {
@@ -1134,10 +1197,139 @@ const RealtimeScanner = (() => {
       yaw: pose.yaw,
       pitch: pose.pitch,
       radius: pose.radius,
+      offsetX: pose.offsetX,
+      offsetY: pose.offsetY,
       confidence: pose.confidence,
       position: [pose.position[0], pose.position[1], pose.position[2]],
       target: [pose.target[0], pose.target[1], pose.target[2]],
     };
+  }
+
+  function collectPoseAnchors(limit) {
+    const anchors = [];
+    for (const surfel of surfels) {
+      if (surfel.confidence < cfg.surfelMinConfidence) continue;
+      anchors.push({
+        pos: surfel.pos,
+        weight: clamp(surfel.confidence / 4, 0.6, 1.8),
+      });
+    }
+    if (anchors.length < limit * 0.6) {
+      const voxelAnchors = collectRenderableVoxels(limit, false);
+      for (const anchor of voxelAnchors) {
+        anchors.push({
+          pos: [anchor.x, anchor.y, anchor.z],
+          weight: clamp(anchor.confidence * 1.2, 0.35, 1.4),
+        });
+      }
+    }
+    if (anchors.length <= limit) return anchors;
+    const stride = Math.ceil(anchors.length / limit);
+    const sampled = [];
+    for (let i = 0; i < anchors.length; i += stride) {
+      sampled.push(anchors[i]);
+    }
+    return sampled;
+  }
+
+  function scorePoseAgainstMap(pose, anchors, silStats, w, h) {
+    if (!anchors.length) return -Infinity;
+    let support = 0;
+    let penalty = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let sumW = 0;
+    let projected = 0;
+    for (const anchor of anchors) {
+      const proj = projectPoint(anchor.pos, pose, w, h);
+      if (!proj || proj.px < 0 || proj.px >= w || proj.py < 0 || proj.py >= h) {
+        penalty += anchor.weight * 0.8;
+        continue;
+      }
+      projected++;
+      sumX += proj.px * anchor.weight;
+      sumY += proj.py * anchor.weight;
+      sumW += anchor.weight;
+      const dx = (proj.px - silStats.cx) / w;
+      const dy = (proj.py - silStats.cy) / h;
+      const dist = Math.hypot(dx, dy);
+      support += anchor.weight * Math.max(0, 1 - dist * 4.4);
+      if (dist > 0.34) {
+        penalty += anchor.weight * (dist - 0.34) * 2.8;
+      }
+    }
+    if (!projected || !sumW) return -Infinity;
+    const centroidDx = (sumX / sumW - silStats.cx) / w;
+    const centroidDy = (sumY / sumW - silStats.cy) / h;
+    const centroidPenalty = Math.hypot(centroidDx, centroidDy);
+    const coveragePenalty = Math.abs(projected / anchors.length - clamp(silStats.coverage / Math.max(cfg.targetCoverage, 0.001), 0, 1.2));
+    return (
+      support * cfg.poseRefineMapWeight -
+      penalty -
+      centroidPenalty * anchors.length * 0.9 -
+      coveragePenalty * anchors.length * 0.45
+    );
+  }
+
+  function refinePoseAgainstMap(initialPose, silStats, w, h) {
+    if (!cfg.poseRefineEnabled) {
+      return { pose: clonePose(initialPose), lock: 0 };
+    }
+    const anchors = collectPoseAnchors(cfg.poseRefineSamples);
+    if (anchors.length < 12) {
+      return { pose: clonePose(initialPose), lock: 0 };
+    }
+    let bestPose = clonePose(initialPose);
+    let bestScore = scorePoseAgainstMap(bestPose, anchors, silStats, w, h);
+    const baseScore = bestScore;
+    let stepYaw = cfg.poseRefineStepYaw;
+    let stepOffset = cfg.poseRefineStepOffset;
+    let stepRadius = cfg.poseRefineStepRadius;
+    for (let iter = 0; iter < cfg.poseRefineIterations; iter++) {
+      let improved = false;
+      const deltas = [
+        [stepYaw, 0, 0, 0, 0],
+        [-stepYaw, 0, 0, 0, 0],
+        [0, stepYaw * 0.65, 0, 0, 0],
+        [0, -stepYaw * 0.65, 0, 0, 0],
+        [0, 0, 0, stepOffset, 0],
+        [0, 0, 0, -stepOffset, 0],
+        [0, 0, stepOffset * 0.8, 0, 0],
+        [0, 0, -stepOffset * 0.8, 0, 0],
+        [0, 0, 0, 0, stepRadius],
+        [0, 0, 0, 0, -stepRadius],
+      ];
+      for (const [dyaw, dpitch, dox, doy, dr] of deltas) {
+        const candidate = buildPose(
+          bestPose.yaw + dyaw,
+          clamp(bestPose.pitch + dpitch, -0.75, 0.75),
+          clamp(bestPose.radius + dr, cfg.cameraR * 0.7, cfg.cameraR * 1.5),
+          clamp(bestPose.offsetX + dox, -cfg.voxelWorld * 0.35, cfg.voxelWorld * 0.35),
+          clamp(bestPose.offsetY + doy, -cfg.voxelWorld * 0.25, cfg.voxelWorld * 0.25)
+        );
+        const score = scorePoseAgainstMap(candidate, anchors, silStats, w, h);
+        if (score > bestScore) {
+          bestPose = candidate;
+          bestScore = score;
+          improved = true;
+        }
+      }
+      if (!improved) {
+        stepYaw *= 0.55;
+        stepOffset *= 0.55;
+        stepRadius *= 0.6;
+      }
+    }
+    const improvement = Number.isFinite(baseScore) ? Math.max(0, bestScore - baseScore) : 0;
+    const lock = clamp(
+      anchors.length / Math.max(cfg.poseRefineSamples, 1) * 0.3 +
+      Math.max(0, bestScore) / Math.max(anchors.length, 1) * 0.55 +
+      improvement / Math.max(anchors.length, 1) * 0.35,
+      0,
+      1
+    );
+    bestPose.confidence = clamp(bestPose.confidence || 0, 0, 1);
+    return { pose: bestPose, lock };
   }
 
   function processVertexTracking(corners, lines, w, h, pose, imgData) {
@@ -1151,8 +1343,12 @@ const RealtimeScanner = (() => {
         if (cur.v3dIdx >= 0 && prev.v3dIdx >= 0 && cur.v3dIdx !== prev.v3dIdx) continue;
         const pos = triangulate2Views(cur.x, cur.y, pose, prev.x, prev.y, hist.pose, w, h);
         if (!pos) continue;
+        if (computeBaselineAngleDeg(cur.x, cur.y, pose, prev.x, prev.y, hist.pose, w, h) < cfg.minBaselineDeg) continue;
         const dist = length3(pos);
         if (dist > cfg.voxelWorld * 0.85) continue;
+        const reprojA = reprojectionError(pos, cur.x, cur.y, pose, w, h);
+        const reprojB = reprojectionError(pos, prev.x, prev.y, hist.pose, w, h);
+        if (Math.max(reprojA, reprojB) > cfg.reprojectionThresholdPx) continue;
         const px = clamp(Math.round(cur.x), 0, w - 1);
         const py = clamp(Math.round(cur.y), 0, h - 1);
         const pi = (py * w + px) * 4;
@@ -1163,6 +1359,7 @@ const RealtimeScanner = (() => {
         ];
         if (prev.v3dIdx >= 0) {
           const vertex = vertices3D[prev.v3dIdx];
+          if (vertex.confidence >= 2 && distance3(vertex.pos, pos) > cfg.vertexMergeDist * 2.2) continue;
           const f = 1 / (vertex.confidence + 1);
           vertex.pos[0] += (pos[0] - vertex.pos[0]) * f;
           vertex.pos[1] += (pos[1] - vertex.pos[1]) * f;
@@ -1172,13 +1369,31 @@ const RealtimeScanner = (() => {
           vertex.col[2] += (col[2] - vertex.col[2]) * f;
           vertex.confidence++;
           cur.v3dIdx = prev.v3dIdx;
+          upsertSurfel(vertex.pos, vertex.col, vertex.confidence);
         } else if (cur.v3dIdx >= 0) {
           prev.v3dIdx = cur.v3dIdx;
+          const vertex = vertices3D[cur.v3dIdx];
+          if (vertex) upsertSurfel(vertex.pos, vertex.col, vertex.confidence);
         } else {
-          const idx = vertices3D.length;
+          const nearbyIdx = findNearbyVertexIndex(pos, cfg.vertexMergeDist);
+          const idx = nearbyIdx >= 0 ? nearbyIdx : vertices3D.length;
           cur.v3dIdx = idx;
           prev.v3dIdx = idx;
-          vertices3D.push({ pos, col, confidence: 1 });
+          if (nearbyIdx >= 0) {
+            const vertex = vertices3D[nearbyIdx];
+            const f = 1 / (vertex.confidence + 1);
+            vertex.pos[0] += (pos[0] - vertex.pos[0]) * f;
+            vertex.pos[1] += (pos[1] - vertex.pos[1]) * f;
+            vertex.pos[2] += (pos[2] - vertex.pos[2]) * f;
+            vertex.col[0] += (col[0] - vertex.col[0]) * f;
+            vertex.col[1] += (col[1] - vertex.col[1]) * f;
+            vertex.col[2] += (col[2] - vertex.col[2]) * f;
+            vertex.confidence++;
+            upsertSurfel(vertex.pos, vertex.col, vertex.confidence);
+          } else {
+            vertices3D.push({ pos, col, confidence: 1 });
+            upsertSurfel(pos, col, 1);
+          }
         }
         wireframeDirty = true;
       }
@@ -1235,6 +1450,59 @@ const RealtimeScanner = (() => {
     keyframeCount++;
   }
 
+  function findNearbyVertexIndex(pos, maxDist) {
+    let bestIdx = -1;
+    let bestDist = maxDist;
+    for (let i = 0; i < vertices3D.length; i++) {
+      const d = distance3(vertices3D[i].pos, pos);
+      if (d < bestDist) {
+        bestDist = d;
+        bestIdx = i;
+      }
+    }
+    return bestIdx;
+  }
+
+  function upsertSurfel(pos, col, confidence) {
+    const cell = cfg.surfelCell;
+    const key = [
+      Math.floor(pos[0] / cell),
+      Math.floor(pos[1] / cell),
+      Math.floor(pos[2] / cell),
+    ].join(',');
+    if (surfelIndex.has(key)) {
+      const surfel = surfels[surfelIndex.get(key)];
+      const weight = Math.max(0.5, confidence);
+      const f = weight / (surfel.confidence + weight);
+      surfel.pos[0] += (pos[0] - surfel.pos[0]) * f;
+      surfel.pos[1] += (pos[1] - surfel.pos[1]) * f;
+      surfel.pos[2] += (pos[2] - surfel.pos[2]) * f;
+      surfel.col[0] += (col[0] - surfel.col[0]) * f;
+      surfel.col[1] += (col[1] - surfel.col[1]) * f;
+      surfel.col[2] += (col[2] - surfel.col[2]) * f;
+      surfel.confidence += weight * 0.6;
+      surfel.hits++;
+    } else {
+      surfelIndex.set(key, surfels.length);
+      surfels.push({
+        pos: [pos[0], pos[1], pos[2]],
+        col: [col[0], col[1], col[2]],
+        confidence: Math.max(1, confidence),
+        hits: 1,
+      });
+    }
+    wireframeDirty = true;
+    voxelsDirty = true;
+  }
+
+  function rebuildSurfelsFromVertices() {
+    surfels = [];
+    surfelIndex = new Map();
+    for (const vertex of vertices3D) {
+      upsertSurfel(vertex.pos, vertex.col, vertex.confidence);
+    }
+  }
+
   function buildCameraBasis(pose) {
     const forward = normalize3(sub3(pose.target, pose.position));
     let right = cross3(forward, [0, 1, 0]);
@@ -1278,6 +1546,19 @@ const RealtimeScanner = (() => {
       py: Math.round(cy - fy * camY / camZ),
       depth: camZ,
     };
+  }
+
+  function reprojectionError(point, px, py, pose, w, h) {
+    const proj = projectPoint(point, pose, w, h);
+    if (!proj) return Infinity;
+    return Math.hypot(proj.px - px, proj.py - py);
+  }
+
+  function computeBaselineAngleDeg(px1, py1, pose1, px2, py2, pose2, w, h) {
+    const ray1 = backprojectRay(px1, py1, pose1, w, h);
+    const ray2 = backprojectRay(px2, py2, pose2, w, h);
+    const cosine = clamp(dot3(ray1.dir, ray2.dir), -1, 1);
+    return Math.acos(cosine) * 180 / Math.PI;
   }
 
   function triangulate2Views(px1, py1, pose1, px2, py2, pose2, w, h) {
@@ -1393,9 +1674,8 @@ const RealtimeScanner = (() => {
       voxelInside[idx] >= cfg.voxelMinObservations;
   }
 
-  function collectRenderableVoxels(maxPoints) {
+  function collectRenderableVoxels(maxPoints, includeColor = true) {
     if (!voxelState) {
-      previewConfidence = 0;
       return [];
     }
     const R = cfg.voxelRes;
@@ -1405,16 +1685,12 @@ const RealtimeScanner = (() => {
     for (let i = 0; i < voxelState.length; i++) {
       if (isRenderableVoxel(i)) count++;
     }
-    if (!count) {
-      previewConfidence = 0;
-      return [];
-    }
+    if (!count) return [];
     const stride = maxPoints !== Infinity && count > maxPoints
       ? Math.ceil(count / maxPoints)
       : 1;
     const entries = [];
     let seen = 0;
-    let sumConfidence = 0;
     for (let i = 0; i < R; i++) {
       const wx = i * step - half;
       for (let j = 0; j < R; j++) {
@@ -1431,19 +1707,55 @@ const RealtimeScanner = (() => {
             0,
             1
           );
-          sumConfidence += confidence;
           entries.push({
             x: wx,
             y: wy,
             z: k * step - half,
-            r: colorWeight > 0 ? voxelColorAcc[base] / colorWeight : 0.42,
-            g: colorWeight > 0 ? voxelColorAcc[base + 1] / colorWeight : 0.72,
-            b: colorWeight > 0 ? voxelColorAcc[base + 2] / colorWeight : 0.92,
+            r: includeColor ? (colorWeight > 0 ? voxelColorAcc[base] / colorWeight : 0.42) : 0.42,
+            g: includeColor ? (colorWeight > 0 ? voxelColorAcc[base + 1] / colorWeight : 0.72) : 0.72,
+            b: includeColor ? (colorWeight > 0 ? voxelColorAcc[base + 2] / colorWeight : 0.92) : 0.92,
+            confidence,
           });
         }
       }
     }
-    previewConfidence = entries.length ? sumConfidence / entries.length : 0;
+    return entries;
+  }
+
+  function collectRenderableSurfels(maxPoints) {
+    const entries = [];
+    for (const surfel of surfels) {
+      if (surfel.confidence < cfg.surfelMinConfidence) continue;
+      entries.push({
+        x: surfel.pos[0],
+        y: surfel.pos[1],
+        z: surfel.pos[2],
+        r: surfel.col[0],
+        g: surfel.col[1],
+        b: surfel.col[2],
+        confidence: clamp(surfel.confidence / 8, 0, 1),
+      });
+    }
+    if (maxPoints === Infinity || entries.length <= maxPoints) return entries;
+    const stride = Math.ceil(entries.length / maxPoints);
+    const sampled = [];
+    for (let i = 0; i < entries.length; i += stride) {
+      sampled.push(entries[i]);
+    }
+    return sampled;
+  }
+
+  function collectRenderableMapEntries(maxPoints) {
+    const surfelBudget = maxPoints === Infinity ? Infinity : Math.max(300, Math.round(maxPoints * 0.35));
+    const voxelBudget = maxPoints === Infinity ? Infinity : Math.max(1000, maxPoints - surfelBudget);
+    let entries = collectRenderableVoxels(voxelBudget, true).concat(collectRenderableSurfels(surfelBudget));
+    if (maxPoints !== Infinity && entries.length > maxPoints) {
+      const stride = Math.ceil(entries.length / maxPoints);
+      entries = entries.filter((_, idx) => idx % stride === 0);
+    }
+    previewConfidence = entries.length
+      ? entries.reduce((sum, entry) => sum + (entry.confidence || 0), 0) / entries.length
+      : 0;
     return entries;
   }
 
@@ -1496,7 +1808,7 @@ const RealtimeScanner = (() => {
     }
     previewPoints.visible = true;
     if (!voxelsDirty) return;
-    const entries = collectRenderableVoxels(cfg.renderBudget);
+    const entries = collectRenderableMapEntries(cfg.renderBudget);
     ensurePreviewCapacity(entries.length);
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
@@ -1519,6 +1831,12 @@ const RealtimeScanner = (() => {
   function updateWireframePreview() {
     if (!wireframeDirty) return;
     wireframeDirty = false;
+    if (surfelObj) {
+      scene.remove(surfelObj);
+      surfelObj.geometry.dispose();
+      surfelObj.material.dispose();
+      surfelObj = null;
+    }
     if (wireVertexObj) {
       scene.remove(wireVertexObj);
       wireVertexObj.geometry.dispose();
@@ -1531,21 +1849,48 @@ const RealtimeScanner = (() => {
       wireEdgeObj.material.dispose();
       wireEdgeObj = null;
     }
-    if (!cfg.showWireframe || !vertices3D.length) return;
-    const vertexPos = [];
-    const vertexCol = [];
-    for (const vertex of vertices3D) {
-      vertexPos.push(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
-      vertexCol.push(vertex.col[0], vertex.col[1], vertex.col[2]);
+    if (cfg.showWireframe && vertices3D.length) {
+      const vertexPos = [];
+      const vertexCol = [];
+      for (const vertex of vertices3D) {
+        vertexPos.push(vertex.pos[0], vertex.pos[1], vertex.pos[2]);
+        vertexCol.push(vertex.col[0], vertex.col[1], vertex.col[2]);
+      }
+      const vGeo = new THREE.BufferGeometry();
+      vGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertexPos, 3));
+      vGeo.setAttribute('color', new THREE.Float32BufferAttribute(vertexCol, 3));
+      wireVertexObj = new THREE.Points(
+        vGeo,
+        new THREE.PointsMaterial({ size: 0.035, vertexColors: true, sizeAttenuation: true })
+      );
+      scene.add(wireVertexObj);
     }
-    const vGeo = new THREE.BufferGeometry();
-    vGeo.setAttribute('position', new THREE.Float32BufferAttribute(vertexPos, 3));
-    vGeo.setAttribute('color', new THREE.Float32BufferAttribute(vertexCol, 3));
-    wireVertexObj = new THREE.Points(
-      vGeo,
-      new THREE.PointsMaterial({ size: 0.035, vertexColors: true, sizeAttenuation: true })
-    );
-    scene.add(wireVertexObj);
+    if (cfg.showSurfels && surfels.length) {
+      const surfelPos = [];
+      const surfelCol = [];
+      for (const surfel of surfels) {
+        if (surfel.confidence < cfg.surfelMinConfidence) continue;
+        surfelPos.push(surfel.pos[0], surfel.pos[1], surfel.pos[2]);
+        surfelCol.push(surfel.col[0], surfel.col[1], surfel.col[2]);
+      }
+      if (surfelPos.length) {
+        const sGeo = new THREE.BufferGeometry();
+        sGeo.setAttribute('position', new THREE.Float32BufferAttribute(surfelPos, 3));
+        sGeo.setAttribute('color', new THREE.Float32BufferAttribute(surfelCol, 3));
+        surfelObj = new THREE.Points(
+          sGeo,
+          new THREE.PointsMaterial({
+            size: Math.max(cfg.surfelCell * 0.8, 0.02),
+            vertexColors: true,
+            transparent: true,
+            opacity: 0.8,
+            sizeAttenuation: true,
+          })
+        );
+        scene.add(surfelObj);
+      }
+    }
+    if (!cfg.showWireframe || !vertices3D.length) return;
     if (!edges3D.size) return;
     const edgePos = [];
     for (const key of edges3D) {
@@ -1569,6 +1914,12 @@ const RealtimeScanner = (() => {
     if (previewPoints) {
       previewGeometry.setDrawRange(0, 0);
       previewPoints.visible = cfg.showVoxels;
+    }
+    if (surfelObj) {
+      scene.remove(surfelObj);
+      surfelObj.geometry.dispose();
+      surfelObj.material.dispose();
+      surfelObj = null;
     }
     if (wireVertexObj) {
       scene.remove(wireVertexObj);
@@ -1688,6 +2039,7 @@ const RealtimeScanner = (() => {
       10,
       33
     );
+    overlayCtx.fillText(`lock ${Math.round(poseLock * 100)}% | surfels ${surfels.length}`, 10, 48);
   }
 
   function scheduleFrame() {

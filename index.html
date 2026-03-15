@@ -373,6 +373,7 @@
                 <div class="setting-row"><label>Synchronizuj kamerę 3D</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="syncCamera" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
                 <div class="setting-row"><label>Pokaż wireframe</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showWireframe" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
                 <div class="setting-row"><label>Pokaż voxele</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showVoxels" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row"><label>Pokaż surfels</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="showSurfels" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
                 <div class="setting-row">
                   <label>Próg dopasowania</label>
                   <input type="range" min="0.3" max="0.9" step="0.05" data-key="matchThreshold" class="cfg-range">
@@ -393,15 +394,36 @@
               <div class="settings-group">
                 <div class="settings-group-title">Stabilizacja pozycji</div>
                 <div class="setting-row"><label>Fuzja pozycji z obrazu</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="poseAssist" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row"><label>Refinacja pozy na mapie</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="poseRefineEnabled" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
                 <div class="setting-row">
                   <label>Siła korekty pozycji</label>
                   <input type="range" min="0" max="1" step="0.05" data-key="poseAssistGain" class="cfg-range">
                   <span class="setting-val" data-val="poseAssistGain"></span>
                 </div>
                 <div class="setting-row">
+                  <label>Iteracje refinacji</label>
+                  <input type="range" min="0" max="5" step="1" data-key="poseRefineIterations" class="cfg-range">
+                  <span class="setting-val" data-val="poseRefineIterations"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Próbki mapy do refinacji</label>
+                  <input type="range" min="40" max="400" step="20" data-key="poseRefineSamples" class="cfg-range">
+                  <span class="setting-val" data-val="poseRefineSamples"></span>
+                </div>
+                <div class="setting-row">
                   <label>Docelowe wypełnienie</label>
                   <input type="range" min="0.08" max="0.4" step="0.01" data-key="targetCoverage" class="cfg-range">
                   <span class="setting-val" data-val="targetCoverage"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Krok yaw refinacji</label>
+                  <input type="range" min="0.005" max="0.1" step="0.005" data-key="poseRefineStepYaw" class="cfg-range">
+                  <span class="setting-val" data-val="poseRefineStepYaw"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Krok przesunięcia</label>
+                  <input type="range" min="0.005" max="0.08" step="0.005" data-key="poseRefineStepOffset" class="cfg-range">
+                  <span class="setting-val" data-val="poseRefineStepOffset"></span>
                 </div>
                 <div class="setting-row">
                   <label>Min. jakość keyframe</label>
@@ -422,6 +444,16 @@
                   <label>Min. centroid keyframe</label>
                   <input type="range" min="0.01" max="0.15" step="0.005" data-key="keyframeMinCentroid" class="cfg-range">
                   <span class="setting-val" data-val="keyframeMinCentroid"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Reprojection error (px)</label>
+                  <input type="range" min="2" max="25" step="1" data-key="reprojectionThresholdPx" class="cfg-range">
+                  <span class="setting-val" data-val="reprojectionThresholdPx"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Min. baseline (deg)</label>
+                  <input type="range" min="0.5" max="6" step="0.1" data-key="minBaselineDeg" class="cfg-range">
+                  <span class="setting-val" data-val="minBaselineDeg"></span>
                 </div>
               </div>
 
@@ -456,6 +488,16 @@
                   <label>Min. obserwacje voxela</label>
                   <input type="range" min="1" max="6" step="1" data-key="voxelMinObservations" class="cfg-range">
                   <span class="setting-val" data-val="voxelMinObservations"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Komórka surfela</label>
+                  <input type="range" min="0.01" max="0.08" step="0.002" data-key="surfelCell" class="cfg-range">
+                  <span class="setting-val" data-val="surfelCell"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Min. confidence surfela</label>
+                  <input type="range" min="1" max="8" step="1" data-key="surfelMinConfidence" class="cfg-range">
+                  <span class="setting-val" data-val="surfelMinConfidence"></span>
                 </div>
                 <div class="setting-row">
                   <label>Limit renderowanych punktów</label>
