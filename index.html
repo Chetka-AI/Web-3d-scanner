@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0e1a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="Mobilne skanowanie 3D - zamień zdjęcia z kamery w model 3D">
+  <title>Scan3D — Skaner 3D</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icons/favicon.svg">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- Splash screen -->
+  <div id="splash" class="splash">
+    <div class="splash-content">
+      <div class="splash-icon">
+        <svg viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect x="4" y="4" width="72" height="72" rx="16" stroke="url(#g1)" stroke-width="3"/>
+          <path d="M24 56V40L40 28L56 40V56" stroke="url(#g1)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="40" cy="38" r="6" stroke="url(#g1)" stroke-width="2"/>
+          <path d="M20 20L28 24M60 20L52 24M20 60L28 56M60 60L52 56" stroke="url(#g1)" stroke-width="1.5" stroke-linecap="round" opacity="0.5"/>
+          <defs>
+            <linearGradient id="g1" x1="4" y1="4" x2="76" y2="76">
+              <stop stop-color="#00d4ff"/>
+              <stop offset="1" stop-color="#7b2ff7"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h1 class="splash-title">Scan3D</h1>
+      <p class="splash-subtitle">Mobilne skanowanie 3D</p>
+      <div class="splash-loader"><div class="loader-bar"></div></div>
+    </div>
+  </div>
+
+  <!-- Main app container -->
+  <div id="app" class="app hidden">
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-title">
+        <svg class="header-logo" viewBox="0 0 24 24" fill="none">
+          <rect x="2" y="2" width="20" height="20" rx="4" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M7 17V12L12 8L17 12V17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="12" cy="11.5" r="2" stroke="currentColor" stroke-width="1.2"/>
+        </svg>
+        <span>Scan3D</span>
+      </div>
+      <div id="headerAction" class="header-action"></div>
+    </header>
+
+    <!-- Tab: Skanuj -->
+    <section id="tabScan" class="tab-content active">
+      <div class="tab-scroll">
+
+        <!-- Camera not started yet -->
+        <div id="scanIntro" class="scan-intro">
+          <div class="intro-card card">
+            <div class="intro-illustration">
+              <svg viewBox="0 0 200 160" fill="none">
+                <rect x="40" y="20" width="120" height="90" rx="12" stroke="#00d4ff" stroke-width="2" opacity="0.3"/>
+                <circle cx="100" cy="65" r="25" stroke="#00d4ff" stroke-width="2"/>
+                <circle cx="100" cy="65" r="10" fill="#00d4ff" opacity="0.2"/>
+                <path d="M60 130 Q100 100 140 130" stroke="#7b2ff7" stroke-width="2" opacity="0.4"/>
+                <circle cx="70" cy="130" r="4" fill="#00d4ff" opacity="0.5"/>
+                <circle cx="100" cy="118" r="4" fill="#7b2ff7" opacity="0.5"/>
+                <circle cx="130" cy="130" r="4" fill="#00d4ff" opacity="0.5"/>
+                <path d="M30 50L20 40M170 50L180 40M30 90L20 100M170 90L180 100" stroke="#00d4ff" stroke-width="1.5" stroke-linecap="round" opacity="0.2"/>
+              </svg>
+            </div>
+            <h2>Skanowanie obiektu</h2>
+            <p>Uchwyć obiekt z wielu kątów, a algorytm zbuduje z nich chmurę punktów i model 3D.</p>
+            <div class="intro-steps">
+              <div class="step-item">
+                <div class="step-num">1</div>
+                <span>Ustaw obiekt na stabilnym tle</span>
+              </div>
+              <div class="step-item">
+                <div class="step-num">2</div>
+                <span>Wykonaj 12–24 zdjęcia dookoła</span>
+              </div>
+              <div class="step-item">
+                <div class="step-num">3</div>
+                <span>Uruchom rekonstrukcję 3D</span>
+              </div>
+            </div>
+            <button id="btnStartCamera" class="btn btn-primary btn-lg">
+              <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+                <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="12" cy="13" r="4" stroke="currentColor" stroke-width="1.8"/>
+              </svg>
+              Uruchom kamerę
+            </button>
+            <button id="btnLoadFiles" class="btn btn-outline btn-sm" style="margin-top:10px;width:100%">
+              <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Wczytaj zdjęcia z plików
+            </button>
+            <input type="file" id="fileInput" accept="image/*" multiple hidden>
+          </div>
+        </div>
+
+        <!-- Camera active view -->
+        <div id="scanCamera" class="scan-camera hidden">
+          <div class="camera-container">
+            <video id="cameraPreview" autoplay playsinline muted></video>
+            <canvas id="cameraOverlay" class="camera-overlay"></canvas>
+            <div class="camera-guide">
+              <div class="guide-ring"></div>
+            </div>
+            <div class="camera-hud">
+              <div class="hud-item" id="hudAngle">
+                <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+                  <path d="M12 2L12 22M2 12L22 12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <span>0°</span>
+              </div>
+              <div class="hud-item" id="hudPhotos">
+                <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+                  <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                  <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
+                  <path d="M21 15l-5-5L5 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <span>0 / 24</span>
+              </div>
+            </div>
+            <div class="camera-coverage" id="cameraCoverage">
+              <svg viewBox="0 0 44 44" class="coverage-ring">
+                <circle cx="22" cy="22" r="19" fill="none" stroke="rgba(255,255,255,0.1)" stroke-width="3"/>
+                <circle cx="22" cy="22" r="19" fill="none" stroke="url(#coverageGrad)" stroke-width="3"
+                  stroke-dasharray="119.38" stroke-dashoffset="119.38" stroke-linecap="round"
+                  id="coverageArc" transform="rotate(-90 22 22)"/>
+                <defs>
+                  <linearGradient id="coverageGrad" x1="0" y1="0" x2="1" y2="1">
+                    <stop offset="0%" stop-color="#00d4ff"/>
+                    <stop offset="100%" stop-color="#34d399"/>
+                  </linearGradient>
+                </defs>
+              </svg>
+              <span id="coverageText" class="coverage-text">0%</span>
+            </div>
+          </div>
+          <div class="camera-controls">
+            <button id="btnFlip" class="btn-circle btn-circle-sm" title="Przełącz kamerę">
+              <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+                <path d="M20 5H16.83L15 3H9L7.17 5H4C2.9 5 2 5.9 2 7V19C2 20.1 2.9 21 4 21H20C21.1 21 22 20.1 22 19V7C22 5.9 21.1 5 20 5Z" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M12 17C14.2091 17 16 15.2091 16 13C16 10.7909 14.2091 9 12 9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                <path d="M12 9L10 11M12 9L14 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button id="btnCapture" class="btn-capture" title="Zrób zdjęcie">
+              <div class="capture-ring"></div>
+            </button>
+            <button id="btnStopCamera" class="btn-circle btn-circle-sm" title="Zamknij kamerę">
+              <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+                <path d="M18 6L6 18M6 6L18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+          <div id="photoStrip" class="photo-strip"></div>
+          <div id="scanTips" class="scan-tips">
+            <div class="tip-carousel">
+              <div class="tip-item active">Powoli obchodź obiekt dookoła</div>
+              <div class="tip-item">Utrzymaj stałą odległość od obiektu</div>
+              <div class="tip-item">Unikaj rozmycia — trzymaj telefon stabilnie</div>
+              <div class="tip-item">Dobrze oświetlony obiekt = lepszy model</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- Tab: Galeria -->
+    <section id="tabGallery" class="tab-content">
+      <div class="tab-scroll">
+        <div id="galleryEmpty" class="empty-state">
+          <svg viewBox="0 0 80 80" fill="none" width="64" height="64">
+            <rect x="8" y="8" width="64" height="64" rx="12" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+            <rect x="16" y="16" width="48" height="48" rx="8" stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+            <circle cx="32" cy="32" r="6" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+            <path d="M56 48L44 36L24 56" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+          </svg>
+          <p>Brak zdjęć</p>
+          <span>Zrób zdjęcia w zakładce Skanuj</span>
+        </div>
+        <div id="galleryGrid" class="gallery-grid hidden"></div>
+        <div id="galleryActions" class="gallery-actions hidden">
+          <button id="btnClearGallery" class="btn btn-outline btn-sm">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+              <path d="M3 6h18M8 6V4h8v2M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Wyczyść wszystko
+          </button>
+          <button id="btnProcess" class="btn btn-primary">
+            <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+              <path d="M12 2L12 22M2 12L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              <path d="M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+            Przetwórz (model 3D)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab: Przetwarzanie -->
+    <section id="tabProcess" class="tab-content">
+      <div class="tab-scroll">
+        <div id="processIdle" class="empty-state">
+          <svg viewBox="0 0 80 80" fill="none" width="64" height="64">
+            <circle cx="40" cy="40" r="30" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+            <path d="M40 20V40L52 52" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+          </svg>
+          <p>Gotowy do przetwarzania</p>
+          <span>Zrób zdjęcia i uruchom rekonstrukcję</span>
+        </div>
+        <div id="processActive" class="process-panel hidden">
+          <div class="process-card card">
+            <div class="process-header">
+              <h3>Rekonstrukcja 3D</h3>
+              <span id="processPercent" class="process-percent">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div id="processBar" class="progress-fill"></div>
+            </div>
+            <div id="processSteps" class="process-steps"></div>
+            <div id="processStats" class="process-stats hidden">
+              <div class="stat-item">
+                <span class="stat-label">Punkty</span>
+                <span id="statPoints" class="stat-value">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Trójkąty</span>
+                <span id="statTriangles" class="stat-value">0</span>
+              </div>
+              <div class="stat-item">
+                <span class="stat-label">Czas</span>
+                <span id="statTime" class="stat-value">0s</span>
+              </div>
+            </div>
+          </div>
+          <button id="btnViewResult" class="btn btn-primary btn-lg hidden">
+            <svg viewBox="0 0 24 24" fill="none" width="20" height="20">
+              <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0022 16z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+              <path d="M12 22V12M22 8L12 13L2 8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Zobacz model 3D
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab: Podgląd 3D -->
+    <section id="tabViewer" class="tab-content">
+      <div class="tab-scroll viewer-scroll">
+        <div id="viewerEmpty" class="empty-state">
+          <svg viewBox="0 0 80 80" fill="none" width="64" height="64">
+            <path d="M40 8L70 24V56L40 72L10 56V24L40 8Z" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+            <path d="M40 72V40M70 24L40 40L10 24" stroke="currentColor" stroke-width="1.5" opacity="0.3"/>
+          </svg>
+          <p>Brak modelu</p>
+          <span>Najpierw przetwórz zdjęcia</span>
+        </div>
+        <div id="viewerContainer" class="viewer-container hidden">
+          <canvas id="viewer3d"></canvas>
+          <div class="viewer-controls">
+            <button id="btnResetView" class="btn-circle btn-circle-xs" title="Resetuj widok">
+              <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                <path d="M1 4v6h6M23 20v-6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+            </button>
+            <button id="btnToggleMode" class="btn-circle btn-circle-xs" title="Przełącz tryb">
+              <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+                <circle cx="6" cy="6" r="1.5" fill="currentColor"/>
+                <circle cx="18" cy="6" r="1.5" fill="currentColor"/>
+                <circle cx="6" cy="18" r="1.5" fill="currentColor"/>
+                <circle cx="18" cy="18" r="1.5" fill="currentColor"/>
+              </svg>
+            </button>
+            <button id="btnPointSizeUp" class="btn-circle btn-circle-xs" title="Większe punkty">
+              <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                <circle cx="12" cy="12" r="6" fill="currentColor" opacity="0.6"/>
+                <path d="M12 8v8M8 12h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+            <button id="btnPointSizeDown" class="btn-circle btn-circle-xs" title="Mniejsze punkty">
+              <svg viewBox="0 0 24 24" fill="none" width="18" height="18">
+                <circle cx="12" cy="12" r="4" fill="currentColor" opacity="0.4"/>
+                <path d="M9 12h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </button>
+          </div>
+          <div class="viewer-info" id="viewerInfo"></div>
+        </div>
+        <div id="viewerActions" class="viewer-actions hidden">
+          <button id="btnExportOBJ" class="btn btn-outline btn-sm">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Eksport OBJ
+          </button>
+          <button id="btnExportPLY" class="btn btn-outline btn-sm">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Eksport PLY
+          </button>
+          <button id="btnNewScan" class="btn btn-primary btn-sm">
+            <svg viewBox="0 0 24 24" fill="none" width="16" height="16">
+              <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Nowy skan
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bottom navigation -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-tab="tabScan">
+        <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+          <path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="12" cy="13" r="4" stroke="currentColor" stroke-width="1.5"/>
+        </svg>
+        <span>Skanuj</span>
+      </button>
+      <button class="nav-item" data-tab="tabGallery">
+        <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+          <rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="1.5"/>
+          <circle cx="8.5" cy="8.5" r="1.5" fill="currentColor"/>
+          <path d="M21 15l-5-5L5 21" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>Galeria</span>
+        <div id="galleryBadge" class="nav-badge hidden">0</div>
+      </button>
+      <button class="nav-item" data-tab="tabProcess">
+        <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/>
+          <path d="M12 6v6l4 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <span>Buduj</span>
+      </button>
+      <button class="nav-item" data-tab="tabViewer">
+        <svg viewBox="0 0 24 24" fill="none" width="22" height="22">
+          <path d="M12 2L22 8.5V15.5L12 22L2 15.5V8.5L12 2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+          <path d="M12 22V15.5M22 8.5L12 15.5L2 8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Model 3D</span>
+      </button>
+    </nav>
+
+    <!-- Toast notifications -->
+    <div id="toastContainer" class="toast-container"></div>
+
+  </div>
+
+  <!-- Photo preview modal -->
+  <div id="photoModal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-content">
+      <img id="modalPhoto" src="" alt="Podgląd zdjęcia">
+      <div class="modal-actions">
+        <button id="btnDeletePhoto" class="btn btn-danger btn-sm">Usuń</button>
+        <button id="btnCloseModal" class="btn btn-outline btn-sm">Zamknij</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/processing.js"></script>
+  <script src="js/viewer.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
