@@ -15,13 +15,21 @@ Aplikacja webowa (PWA) do skanowania obiektów z kamery smartfona i generowania 
 - **Dopasowywanie NCC** — sparowane cechy między widokami
 - **Triangulacja geometryczna** — punkty 3D z par dopasowanych cech
 
-### Skanowanie na żywo (nowy moduł)
+### Skanowanie na żywo (real-time)
 - **Real-time scanning** — ciągłe przechwytywanie klatek z kamery
 - **Live depth estimation** — AI przetwarza każdą klatkę w locie
 - **Akumulacja chmury punktów** — punkty dodawane przyrostowo w czasie rzeczywistym
 - **Podgląd 3D PiP** — miniatura modelu 3D nakładana na obraz kamery
 - **Voxel deduplication** — hash-based siatka voxeli zapobiega duplikatom
 - **HUD** — FPS, liczba punktów, liczba klatek, status nagrywania
+
+### Ulepszenia skanowania realtime
+- **Filtr Kalmana** — wygładzanie orientacji 1D (yaw/pitch) z osobnym szumem procesu i pomiaru, eliminuje dryft i jitter z żyroskopu
+- **Sparse Optical Flow (Lucas-Kanade)** — śledzenie punktów kluczowych między klatkami z iteracyjnym LK, daje dodatkową korektę kąta kamery niezależną od IMU
+- **Temporal Point Fusion** — confidence-weighted akumulacja punktów w spatial hash map; każdy punkt zbiera obserwacje z wielu klatek, niestabilne punkty są automatycznie usuwane po `fusionMaxAge` klatek
+- **ICP Alignment (Iterative Closest Point)** — wyrównywanie nowych punktów do dotychczasowego modelu translacją; zapewnia spójność pozycji między klatkami
+- **Incremental GPU Buffer** — pre-alokowany `BufferGeometry` z in-place `needsUpdate`, eliminuje garbage collection spowodowane tworzeniem nowych geometrii co klatkę
+- **Adaptive Frame Pacing** — automatyczne dopasowanie `procSize` na podstawie osiągniętego FPS (cel konfiguratywny, domyślnie 15 FPS); skaner sam obniża/podnosi rozdzielczość przetwarzania
 
 ### Wspólne
 - **Podgląd kamery** — WebRTC, przełączanie przód/tył, orientacja urządzenia

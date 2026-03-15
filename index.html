@@ -249,6 +249,14 @@
                 <svg viewBox="0 0 24 24" fill="none" width="14" height="14"><circle cx="12" cy="5" r="2.5" fill="currentColor"/><circle cx="5" cy="19" r="2.5" fill="currentColor"/><circle cx="19" cy="19" r="2.5" fill="currentColor"/><path d="M12 7.5L5 16.5M12 7.5L19 16.5M5 19h14" stroke="currentColor" stroke-width="1" opacity="0.5"/></svg>
                 <span>0 / 0</span>
               </div>
+              <div class="hud-item" id="liveFlow">
+                <svg viewBox="0 0 24 24" fill="none" width="14" height="14"><path d="M5 12h14M13 6l6 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                <span>0 flow</span>
+              </div>
+              <div class="hud-item" id="liveFused">
+                <svg viewBox="0 0 24 24" fill="none" width="14" height="14"><circle cx="12" cy="12" r="8" stroke="currentColor" stroke-width="1.5" opacity="0.5"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+                <span>0 fused</span>
+              </div>
             </div>
             <div id="liveStatusBadge" class="live-status-badge">Gotowy</div>
             <div id="liveRecDot" class="live-rec-dot hidden"></div>
@@ -379,6 +387,62 @@
                   <label>Bufor klatek</label>
                   <input type="range" min="2" max="12" step="1" data-key="maxHistory" class="cfg-range">
                   <span class="setting-val" data-val="maxHistory"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Filtr Kalmana</div>
+                <div class="setting-row"><label>Włącz Kalman</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="useKalman" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row">
+                  <label>Szum procesu (Q)</label>
+                  <input type="range" min="0.0001" max="0.01" step="0.0001" data-key="kalmanQ" class="cfg-range">
+                  <span class="setting-val" data-val="kalmanQ"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Szum pomiaru (R)</label>
+                  <input type="range" min="0.005" max="0.3" step="0.005" data-key="kalmanR" class="cfg-range">
+                  <span class="setting-val" data-val="kalmanR"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Optical Flow (Lucas-Kanade)</div>
+                <div class="setting-row"><label>Włącz optical flow</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="useOpticalFlow" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row">
+                  <label>Max śledzonych pkt</label>
+                  <input type="range" min="10" max="120" step="5" data-key="optFlowMaxPts" class="cfg-range">
+                  <span class="setting-val" data-val="optFlowMaxPts"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Fuzja czasowa punktów</div>
+                <div class="setting-row"><label>Włącz fuzję</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="useTemporalFusion" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row">
+                  <label>Rozmiar komórki fuzji</label>
+                  <input type="range" min="0.005" max="0.1" step="0.005" data-key="fusionVoxelSize" class="cfg-range">
+                  <span class="setting-val" data-val="fusionVoxelSize"></span>
+                </div>
+                <div class="setting-row">
+                  <label>Min. obserwacji (stab.)</label>
+                  <input type="range" min="1" max="10" step="1" data-key="fusionMinConf" class="cfg-range">
+                  <span class="setting-val" data-val="fusionMinConf"></span>
+                </div>
+                <div class="setting-row"><label>Włącz ICP alignment</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="useICP" class="cfg-toggle"><span class="toggle-slider"></span></label></div>
+                <div class="setting-row">
+                  <label>Iteracje ICP</label>
+                  <input type="range" min="1" max="15" step="1" data-key="icpIterations" class="cfg-range">
+                  <span class="setting-val" data-val="icpIterations"></span>
+                </div>
+              </div>
+
+              <div class="settings-group">
+                <div class="settings-group-title">Adaptacyjny FPS</div>
+                <div class="setting-row"><label>Auto-dopasowanie rozdzielczości</label><label class="toggle-switch toggle-sm"><input type="checkbox" data-key="adaptiveFps" class="cfg-toggle" checked><span class="toggle-slider"></span></label></div>
+                <div class="setting-row">
+                  <label>Docelowy FPS</label>
+                  <input type="range" min="5" max="30" step="1" data-key="targetFps" class="cfg-range">
+                  <span class="setting-val" data-val="targetFps"></span>
                 </div>
               </div>
 
