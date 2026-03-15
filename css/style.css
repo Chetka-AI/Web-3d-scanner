@@ -679,6 +679,15 @@ img, video, canvas {
   object-fit: cover;
 }
 
+.live-overlay-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
 .live-3d-pip {
   position: absolute;
   bottom: 10px;
@@ -690,6 +699,7 @@ img, video, canvas {
   border: 2px solid rgba(0, 212, 255, 0.3);
   background: rgba(8, 12, 22, 0.9);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  z-index: 2;
 }
 
 .live-3d-pip canvas {
@@ -715,7 +725,9 @@ img, video, canvas {
   left: 10px;
   right: 10px;
   display: flex;
-  gap: 6px;
+  gap: 4px;
+  flex-wrap: wrap;
+  z-index: 3;
 }
 
 .live-hud .hud-item {
@@ -725,8 +737,9 @@ img, video, canvas {
 
 .live-status-badge {
   position: absolute;
-  top: 46px;
+  top: 48px;
   left: 10px;
+  z-index: 3;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   font-size: 0.68rem;
