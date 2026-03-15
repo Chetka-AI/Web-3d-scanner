@@ -9,8 +9,10 @@
  *  5. Silhouette extraction (Otsu / manual threshold + flood fill)
  *  6. Morphological ops on silhouette (dilate / erode / open / close)
  *  7. Visual-hull carving on voxel grid
- *  8. Overlay rendering (edges / lines / corners / angles / silhouette)
- *  9. Quality metric calculation
+ *  8. Sparse optical flow (Lucas-Kanade) for inter-frame tracking
+ *  9. Temporal point fusion with confidence-weighted ICP alignment
+ * 10. Overlay rendering (edges / lines / corners / angles / silhouette)
+ * 11. Quality metric calculation
  */
 const RealtimeScanner = (() => {
 
@@ -57,12 +59,33 @@ const RealtimeScanner = (() => {
     matchThreshold: 0.55,
     minAngleDiff:   0.15,
     maxHistory:     6,
+
+    useKalman:          true,
+    kalmanQ:            0.001,   // process noise covariance
+    kalmanR:            0.05,    // measurement noise covariance
+
+    useOpticalFlow:     true,
+    optFlowWin:         7,       // LK window half-size
+    optFlowMaxPts:      60,      // max tracked feature points
+    optFlowMinDisp:     1.5,     // min displacement to count as motion (px)
+
+    useTemporalFusion:  true,
+    fusionVoxelSize:    0.02,    // spatial hash cell size for point fusion
+    fusionMaxAge:       30,      // frames after which unfused points decay
+    fusionMinConf:      2,       // min observations for a point to be stable
+
+    adaptiveFps:        true,
+    targetFps:          15,
+
+    useICP:             true,
+    icpIterations:      5,
+    icpMaxCorrespDist:  0.15,
   };
 
   const PRESETS = {
-    fast:     { procSize:180, cannyLo:40, cannyHi:100, blurRadius:1, sharpen:false, minLineLen:16, voxelRes:32, minFrameMs:30, morphType:'none', morphIterations:0, dpEpsilon:4, maxHistory:4 },
-    balanced: { procSize:240, cannyLo:30, cannyHi:80,  blurRadius:1, sharpen:false, minLineLen:12, voxelRes:48, minFrameMs:50, morphType:'close', morphIterations:1, dpEpsilon:3, maxHistory:6 },
-    quality:  { procSize:320, cannyLo:20, cannyHi:65,  blurRadius:2, sharpen:true,  minLineLen:8,  voxelRes:64, minFrameMs:80, morphType:'close', morphIterations:2, dpEpsilon:2, maxHistory:8 },
+    fast:     { procSize:180, cannyLo:40, cannyHi:100, blurRadius:1, sharpen:false, minLineLen:16, voxelRes:32, minFrameMs:30, morphType:'none', morphIterations:0, dpEpsilon:4, maxHistory:4, useOpticalFlow:false, useTemporalFusion:false, useICP:false, adaptiveFps:true },
+    balanced: { procSize:240, cannyLo:30, cannyHi:80,  blurRadius:1, sharpen:false, minLineLen:12, voxelRes:48, minFrameMs:50, morphType:'close', morphIterations:1, dpEpsilon:3, maxHistory:6, useOpticalFlow:true,  useTemporalFusion:true,  useICP:false, adaptiveFps:true },
+    quality:  { procSize:320, cannyLo:20, cannyHi:65,  blurRadius:2, sharpen:true,  minLineLen:8,  voxelRes:64, minFrameMs:80, morphType:'close', morphIterations:2, dpEpsilon:2, maxHistory:8, useOpticalFlow:true,  useTemporalFusion:true,  useICP:true,  adaptiveFps:true },
   };
 
   function set(key, value) { if (key in cfg) cfg[key] = value; }
@@ -72,7 +95,19 @@ const RealtimeScanner = (() => {
     const p = PRESETS[name];
     if (!p) return;
     for (const k in p) cfg[k] = p[k];
-    if (scanning) { initVoxelGrid(); clear3DScene(); }
+    if (scanning) { initVoxelGrid(); clear3DScene(); resetFusionBuffer(); }
+  }
+
+  /* ============== Kalman Filter (1D, per-axis) ============== */
+  function makeKalman1D(q, r, initial) {
+    return { x: initial || 0, p: 1.0, q: q, r: r };
+  }
+  function kalmanUpdate(kf, measurement) {
+    kf.p += kf.q;
+    const k = kf.p / (kf.p + kf.r);
+    kf.x += k * (measurement - kf.x);
+    kf.p *= (1 - k);
+    return kf.x;
   }
 
   /* ============== State ============== */
@@ -90,6 +125,21 @@ const RealtimeScanner = (() => {
 
   let smoothYaw = 0, smoothPitch = 0;
   let lastYaw = null;
+
+  let kfYaw = null, kfPitch = null;
+
+  let prevGray = null, prevFeatures = null;
+  let opticalFlowDelta = { dx: 0, dy: 0, count: 0 };
+
+  let fusionMap = null;
+  let fusionDirty = false;
+  let fusionPointObj = null;
+  const FUSION_MAX_POINTS = 100000;
+
+  let voxelBufGeo = null, voxelBufMat = null;
+  const VOXEL_BUF_MAX = 200000;
+
+  let recentFpsSamples = [];
 
   let vertexHistory = [];
   let vertices3D = [];
@@ -134,9 +184,14 @@ const RealtimeScanner = (() => {
     scanning = true; paused = false; processing = false;
     frameCount = 0; edgeCount = 0; cornerCount = 0; quality = 0;
     smoothYaw = 0; smoothPitch = 0; lastYaw = null;
+    kfYaw = null; kfPitch = null;
+    prevGray = null; prevFeatures = null;
+    opticalFlowDelta = { dx: 0, dy: 0, count: 0 };
+    recentFpsSamples = [];
     vertexHistory = []; vertices3D = []; edges3D = new Set();
     wireframeDirty = false;
     initVoxelGrid();
+    resetFusionBuffer();
     clear3DScene();
     startRenderLoop();
     emitStatus('scanning');
@@ -149,17 +204,24 @@ const RealtimeScanner = (() => {
 
   function reset() {
     stopScanning(); frameCount = 0; quality = 0;
-    initVoxelGrid(); clear3DScene();
+    initVoxelGrid(); resetFusionBuffer(); clear3DScene();
+    prevGray = null; prevFeatures = null;
+    kfYaw = null; kfPitch = null;
     if (overlayCtx) overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
     emitStats();
   }
 
   function destroy() {
     stopScanning(); stopCamera(); stopRenderLoop();
-    clear3DScene(); voxels = null;
+    clear3DScene(); voxels = null; fusionMap = null;
+    prevGray = null; prevFeatures = null;
   }
 
   function getPointCloud() {
+    if (cfg.useTemporalFusion) {
+      const fused = getFusedPointCloud();
+      if (fused) return fused;
+    }
     if (!voxels) return { positions: new Float32Array(0), colors: new Float32Array(0) };
     const R = cfg.voxelRes, half = cfg.voxelWorld / 2, step = cfg.voxelWorld / R;
     const pos = [], col = [];
@@ -181,6 +243,9 @@ const RealtimeScanner = (() => {
       edges: edgeCount, corners: cornerCount,
       verts3D: vertices3D.length, edges3D: edges3D.size,
       fps, quality, scanning, paused,
+      flowTracked: opticalFlowDelta.count,
+      fusedPts: fusionMap ? fusionMap.size : 0,
+      procSize: cfg.procSize,
     };
   }
   function isScanning() { return scanning; }
@@ -606,6 +671,210 @@ const RealtimeScanner = (() => {
   }
   function dot(a,b) { return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]; }
 
+  /* ============== Sparse Optical Flow (Lucas-Kanade) ============== */
+
+  function selectFlowFeatures(gray, w, h, edgeMap) {
+    const pts = [];
+    const step = Math.max(4, Math.floor(Math.min(w, h) / 20));
+    for (let y = step; y < h - step; y += step) {
+      for (let x = step; x < w - step; x += step) {
+        if (edgeMap && edgeMap[y * w + x]) {
+          pts.push({ x, y });
+        } else {
+          const gx = (gray[y * w + x + 1] || 0) - (gray[y * w + x - 1] || 0);
+          const gy = (gray[(y + 1) * w + x] || 0) - (gray[(y - 1) * w + x] || 0);
+          if (Math.abs(gx) + Math.abs(gy) > 30) pts.push({ x, y });
+        }
+        if (pts.length >= cfg.optFlowMaxPts) return pts;
+      }
+    }
+    return pts;
+  }
+
+  function trackLK(prevG, curG, w, h, features) {
+    const win = cfg.optFlowWin;
+    const tracked = [];
+    for (const f of features) {
+      let px = f.x, py = f.y;
+      let converged = false;
+      for (let iter = 0; iter < 10; iter++) {
+        let sxx = 0, syy = 0, sxy = 0, stx = 0, sty = 0;
+        for (let dy = -win; dy <= win; dy++) {
+          for (let dx = -win; dx <= win; dx++) {
+            const ox = f.x + dx, oy = f.y + dy;
+            const nx = Math.round(px + dx), ny = Math.round(py + dy);
+            if (ox < 1 || ox >= w - 1 || oy < 1 || oy >= h - 1) continue;
+            if (nx < 1 || nx >= w - 1 || ny < 1 || ny >= h - 1) continue;
+            const ix = (prevG[oy * w + ox + 1] - prevG[oy * w + ox - 1]) * 0.5;
+            const iy = (prevG[(oy + 1) * w + ox] - prevG[(oy - 1) * w + ox]) * 0.5;
+            const it = curG[ny * w + nx] - prevG[oy * w + ox];
+            sxx += ix * ix; syy += iy * iy; sxy += ix * iy;
+            stx += ix * it; sty += iy * it;
+          }
+        }
+        const det = sxx * syy - sxy * sxy;
+        if (Math.abs(det) < 1e-4) break;
+        const ddx = (syy * (-stx) - sxy * (-sty)) / det;
+        const ddy = (sxx * (-sty) - sxy * (-stx)) / det;
+        px += ddx; py += ddy;
+        if (Math.abs(ddx) < 0.01 && Math.abs(ddy) < 0.01) { converged = true; break; }
+      }
+      if (converged && px >= 0 && px < w && py >= 0 && py < h) {
+        tracked.push({ ox: f.x, oy: f.y, nx: px, ny: py });
+      }
+    }
+    return tracked;
+  }
+
+  function computeOpticalFlowMotion(prevG, curG, w, h, edgeMap) {
+    if (!cfg.useOpticalFlow || !prevG) {
+      opticalFlowDelta = { dx: 0, dy: 0, count: 0 };
+      return;
+    }
+    const features = prevFeatures || selectFlowFeatures(prevG, w, h, null);
+    const tracked = trackLK(prevG, curG, w, h, features);
+    let sumDx = 0, sumDy = 0, cnt = 0;
+    for (const t of tracked) {
+      const dx = t.nx - t.ox, dy = t.ny - t.oy;
+      if (Math.sqrt(dx * dx + dy * dy) > cfg.optFlowMinDisp) {
+        sumDx += dx; sumDy += dy; cnt++;
+      }
+    }
+    opticalFlowDelta = cnt > 3 ? { dx: sumDx / cnt, dy: sumDy / cnt, count: cnt } : { dx: 0, dy: 0, count: 0 };
+    prevFeatures = selectFlowFeatures(curG, w, h, edgeMap);
+  }
+
+  /* ============== Temporal Point Fusion ============== */
+
+  function resetFusionBuffer() {
+    fusionMap = new Map();
+    fusionDirty = true;
+  }
+
+  function fusionKey(x, y, z) {
+    const s = cfg.fusionVoxelSize;
+    return (Math.floor(x / s) * 73856093 ^ Math.floor(y / s) * 19349663 ^ Math.floor(z / s) * 83492791) | 0;
+  }
+
+  function fusePoints(positions, colors, currentFrame) {
+    if (!cfg.useTemporalFusion) return;
+    if (!fusionMap) resetFusionBuffer();
+    const n = positions.length / 3;
+    for (let i = 0; i < n; i++) {
+      const px = positions[i * 3], py = positions[i * 3 + 1], pz = positions[i * 3 + 2];
+      const key = fusionKey(px, py, pz);
+      if (fusionMap.has(key)) {
+        const e = fusionMap.get(key);
+        const w = 1 / (e.conf + 1);
+        e.x += (px - e.x) * w;
+        e.y += (py - e.y) * w;
+        e.z += (pz - e.z) * w;
+        e.r += (colors[i * 3] - e.r) * w;
+        e.g += (colors[i * 3 + 1] - e.g) * w;
+        e.b += (colors[i * 3 + 2] - e.b) * w;
+        e.conf++;
+        e.lastSeen = currentFrame;
+      } else if (fusionMap.size < FUSION_MAX_POINTS) {
+        fusionMap.set(key, {
+          x: px, y: py, z: pz,
+          r: colors[i * 3], g: colors[i * 3 + 1], b: colors[i * 3 + 2],
+          conf: 1, lastSeen: currentFrame,
+        });
+      }
+    }
+
+    for (const [k, v] of fusionMap) {
+      if (currentFrame - v.lastSeen > cfg.fusionMaxAge && v.conf < cfg.fusionMinConf) {
+        fusionMap.delete(k);
+      }
+    }
+    fusionDirty = true;
+  }
+
+  function getFusedPointCloud() {
+    if (!fusionMap || fusionMap.size === 0) return null;
+    const pos = [], col = [];
+    for (const v of fusionMap.values()) {
+      if (v.conf >= cfg.fusionMinConf) {
+        pos.push(v.x, v.y, v.z);
+        col.push(v.r, v.g, v.b);
+      }
+    }
+    return pos.length ? { positions: new Float32Array(pos), colors: new Float32Array(col) } : null;
+  }
+
+  /* ============== Simple ICP Alignment ============== */
+
+  function alignICP(srcPts, tgtPts, tgtN) {
+    if (!cfg.useICP || srcPts.length < 9 || tgtN < 3) return srcPts;
+
+    const ns = srcPts.length / 3;
+    const out = new Float32Array(srcPts);
+    let cx = 0, cy = 0, cz = 0;
+
+    for (let iter = 0; iter < cfg.icpIterations; iter++) {
+      cx = 0; cy = 0; cz = 0;
+      let cnt = 0;
+      for (let i = 0; i < ns; i++) {
+        const sx = out[i * 3], sy = out[i * 3 + 1], sz = out[i * 3 + 2];
+        let bestD = cfg.icpMaxCorrespDist * cfg.icpMaxCorrespDist, bx = 0, by = 0, bz = 0, found = false;
+        for (let j = 0; j < tgtN; j++) {
+          const dx = sx - tgtPts[j * 3], dy = sy - tgtPts[j * 3 + 1], dz = sz - tgtPts[j * 3 + 2];
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < bestD) { bestD = d2; bx = tgtPts[j * 3]; by = tgtPts[j * 3 + 1]; bz = tgtPts[j * 3 + 2]; found = true; }
+        }
+        if (found) { cx += bx - sx; cy += by - sy; cz += bz - sz; cnt++; }
+      }
+      if (cnt < 3) break;
+      cx /= cnt; cy /= cnt; cz /= cnt;
+      for (let i = 0; i < ns; i++) {
+        out[i * 3] += cx; out[i * 3 + 1] += cy; out[i * 3 + 2] += cz;
+      }
+    }
+    return out;
+  }
+
+  /* ============== Adaptive Frame Pacing ============== */
+
+  function adaptProcSize(measuredFps) {
+    if (!cfg.adaptiveFps) return;
+    recentFpsSamples.push(measuredFps);
+    if (recentFpsSamples.length > 8) recentFpsSamples.shift();
+    if (recentFpsSamples.length < 4) return;
+
+    const avgFps = recentFpsSamples.reduce((a, b) => a + b, 0) / recentFpsSamples.length;
+    if (avgFps < cfg.targetFps * 0.7 && cfg.procSize > 120) {
+      cfg.procSize = Math.max(120, cfg.procSize - 20);
+    } else if (avgFps > cfg.targetFps * 1.4 && cfg.procSize < 400) {
+      cfg.procSize = Math.min(400, cfg.procSize + 10);
+    }
+  }
+
+  /* ============== Incremental GPU Buffer ============== */
+
+  function ensureVoxelBuffer() {
+    if (voxelBufGeo) return;
+    voxelBufGeo = new THREE.BufferGeometry();
+    const pos = new Float32Array(VOXEL_BUF_MAX * 3);
+    const col = new Float32Array(VOXEL_BUF_MAX * 3);
+    voxelBufGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    voxelBufGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    voxelBufGeo.setDrawRange(0, 0);
+    voxelBufMat = new THREE.PointsMaterial({ size: 0.03, vertexColors: true, sizeAttenuation: true });
+  }
+
+  function updateVoxelBuffer(positions, colors, count) {
+    if (!voxelBufGeo) return;
+    const posAttr = voxelBufGeo.attributes.position;
+    const colAttr = voxelBufGeo.attributes.color;
+    const n = Math.min(count, VOXEL_BUF_MAX);
+    posAttr.array.set(positions.subarray(0, n * 3));
+    colAttr.array.set(colors.subarray(0, n * 3));
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+    voxelBufGeo.setDrawRange(0, n);
+  }
+
   /* ============== Visual Hull ============== */
 
   function initVoxelGrid() {
@@ -766,23 +1035,44 @@ const RealtimeScanner = (() => {
   }
 
   function update3DPreview() {
+    const showFused = cfg.useTemporalFusion && fusionDirty;
+    if (!voxelsDirty && !showFused) return;
+
+    if (showFused) {
+      fusionDirty = false;
+      const fused = getFusedPointCloud();
+      if (fused && fused.positions.length > 0) {
+        if (fusionPointObj) { scene.remove(fusionPointObj); fusionPointObj.geometry.dispose(); fusionPointObj.material.dispose(); fusionPointObj = null; }
+        ensureVoxelBuffer();
+        const n = fused.positions.length / 3;
+        updateVoxelBuffer(fused.positions, fused.colors, n);
+        if (!fusionPointObj) {
+          fusionPointObj = new THREE.Points(voxelBufGeo, voxelBufMat);
+          scene.add(fusionPointObj);
+        }
+      }
+    }
+
     if (!voxelsDirty) return;
     voxelsDirty = false;
-    if (voxelMesh) { scene.remove(voxelMesh); voxelMesh.geometry.dispose(); voxelMesh.material.dispose(); voxelMesh = null; }
-    const R = cfg.voxelRes, half = cfg.voxelWorld/2, step = cfg.voxelWorld/R;
-    const pos = [], col = [];
-    for (let i=0;i<R;i++) for (let j=0;j<R;j++) for (let k=0;k<R;k++) {
-      const v = voxels[i*R*R+j*R+k]; if (!v) continue;
-      pos.push(i*step-half, j*step-half, k*step-half);
-      const r=(v>>16&0xff)/255, g=(v>>8&0xff)/255, b=(v&0xff)/255;
-      col.push(r||0.4, g||0.7, b||0.9);
+
+    if (!cfg.useTemporalFusion) {
+      if (voxelMesh) { scene.remove(voxelMesh); voxelMesh.geometry.dispose(); voxelMesh.material.dispose(); voxelMesh = null; }
+      const R = cfg.voxelRes, half = cfg.voxelWorld/2, step = cfg.voxelWorld/R;
+      const pos = [], col = [];
+      for (let i=0;i<R;i++) for (let j=0;j<R;j++) for (let k=0;k<R;k++) {
+        const v = voxels[i*R*R+j*R+k]; if (!v) continue;
+        pos.push(i*step-half, j*step-half, k*step-half);
+        const r=(v>>16&0xff)/255, g=(v>>8&0xff)/255, b=(v&0xff)/255;
+        col.push(r||0.4, g||0.7, b||0.9);
+      }
+      if (!pos.length) return;
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+      geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
+      voxelMesh = new THREE.Points(geo, new THREE.PointsMaterial({ size: step*0.9, vertexColors:true, sizeAttenuation:true }));
+      scene.add(voxelMesh);
     }
-    if (!pos.length) return;
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
-    geo.setAttribute('color', new THREE.Float32BufferAttribute(col,3));
-    voxelMesh = new THREE.Points(geo, new THREE.PointsMaterial({ size: step*0.9, vertexColors:true, sizeAttenuation:true }));
-    scene.add(voxelMesh);
   }
 
   function startRenderLoop() {
@@ -855,9 +1145,12 @@ const RealtimeScanner = (() => {
   }
 
   function clear3DScene() {
-    if (voxelMesh)     { scene.remove(voxelMesh);     voxelMesh.geometry.dispose();     voxelMesh.material.dispose();     voxelMesh=null; }
-    if (wireVertexObj) { scene.remove(wireVertexObj); wireVertexObj.geometry.dispose(); wireVertexObj.material.dispose(); wireVertexObj=null; }
-    if (wireEdgeObj)   { scene.remove(wireEdgeObj);   wireEdgeObj.geometry.dispose();   wireEdgeObj.material.dispose();   wireEdgeObj=null; }
+    if (voxelMesh)      { scene.remove(voxelMesh);      voxelMesh.geometry.dispose();      voxelMesh.material.dispose();      voxelMesh=null; }
+    if (wireVertexObj)  { scene.remove(wireVertexObj);  wireVertexObj.geometry.dispose();  wireVertexObj.material.dispose();  wireVertexObj=null; }
+    if (wireEdgeObj)    { scene.remove(wireEdgeObj);    wireEdgeObj.geometry.dispose();    wireEdgeObj.material.dispose();    wireEdgeObj=null; }
+    if (fusionPointObj) { scene.remove(fusionPointObj); fusionPointObj.geometry.dispose(); fusionPointObj.material.dispose(); fusionPointObj=null; }
+    if (voxelBufGeo)    { voxelBufGeo.dispose(); voxelBufGeo=null; }
+    if (voxelBufMat)    { voxelBufMat.dispose(); voxelBufMat=null; }
   }
 
   /* ============== Frame Loop ============== */
@@ -891,6 +1184,9 @@ const RealtimeScanner = (() => {
       const corners = detectCornersAndAngles(lines);
       const sil = extractSilhouette(gray, pw, ph);
 
+      computeOpticalFlowMotion(prevGray, gray, pw, ph, edgeMap);
+      prevGray = gray;
+
       edgeCount = lines.length;
       cornerCount = corners.length;
       quality = computeQuality(edgeMap, sil, pw, ph);
@@ -912,12 +1208,28 @@ const RealtimeScanner = (() => {
       }
       lastYaw = ori.yaw;
 
+      if (cfg.useTemporalFusion && voxelsDirty) {
+        const cloud = getPointCloud();
+        if (cloud.positions.length > 0) {
+          const fused = getFusedPointCloud();
+          let aligned = cloud.positions;
+          if (cfg.useICP && fused && fused.positions.length > 9) {
+            aligned = alignICP(cloud.positions, fused.positions, fused.positions.length / 3);
+          }
+          fusePoints(aligned, cloud.colors, frameCount);
+        }
+      }
+
       resizeOverlay();
       drawOverlay(edgeMap, lines, corners, sil, pw, ph);
 
       frameCount++;
-      fps = Math.round(1000 / (performance.now()-t0));
+      const elapsed = performance.now() - t0;
+      fps = Math.round(1000 / elapsed);
       lastProcTime = performance.now();
+
+      adaptProcSize(fps);
+
       emitStats();
 
     } catch (err) { console.error('Frame error:', err); }
@@ -938,6 +1250,22 @@ const RealtimeScanner = (() => {
       yaw   = performance.now()/1000 * 0.3;
       pitch = 0;
     }
+
+    if (cfg.useOpticalFlow && opticalFlowDelta.count > 5) {
+      const flowYawCorrection = opticalFlowDelta.dx * 0.0003;
+      yaw += flowYawCorrection;
+    }
+
+    if (cfg.useKalman) {
+      if (!kfYaw) kfYaw = makeKalman1D(cfg.kalmanQ, cfg.kalmanR, yaw);
+      if (!kfPitch) kfPitch = makeKalman1D(cfg.kalmanQ, cfg.kalmanR, pitch);
+      kfYaw.q = cfg.kalmanQ; kfYaw.r = cfg.kalmanR;
+      kfPitch.q = cfg.kalmanQ; kfPitch.r = cfg.kalmanR;
+      yaw   = kalmanUpdate(kfYaw, yaw);
+      pitch = kalmanUpdate(kfPitch, pitch);
+      return { yaw, pitch };
+    }
+
     if (cfg.smoothOrientation) {
       const f = cfg.smoothFactor;
       smoothYaw   = smoothYaw  * (1-f) + yaw   * f;

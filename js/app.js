@@ -625,6 +625,12 @@
     $('liveCorners').querySelector('span').textContent = `${stats.corners || 0} narożn.`;
     $('liveVerts3D').querySelector('span').textContent = `${stats.verts3D || 0}v / ${stats.edges3D || 0}e`;
 
+    const flowEl = $('liveFlow');
+    if (flowEl) flowEl.querySelector('span').textContent = `${stats.flowTracked || 0} flow`;
+
+    const fusedEl = $('liveFused');
+    if (fusedEl) fusedEl.querySelector('span').textContent = `${stats.fusedPts || 0} fused`;
+
     const q = stats.quality || 0;
     const fill = $('qualityFill');
     const text = $('qualityText');
