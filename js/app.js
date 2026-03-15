@@ -141,10 +141,13 @@
     });
 
     if (tabId === 'tabGallery') refreshGallery();
-    if (tabId === 'tabViewer' && ViewerModule.isInitialized()) {
-      ViewerModule.resize();
-      ViewerModule.startLoop();
-    } else {
+
+    if (tabId === 'tabViewer') {
+      if (ViewerModule.isInitialized()) {
+        ViewerModule.resize();
+        ViewerModule.startLoop();
+      }
+    } else if (ViewerModule.isInitialized()) {
       ViewerModule.stopLoop();
     }
   }
