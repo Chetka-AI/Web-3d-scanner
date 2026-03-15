@@ -405,33 +405,12 @@
 
   /* ===== Live Scanning ===== */
   async function startLiveScanning() {
-    if (!aiMode) {
-      toast('Skanowanie na żywo wymaga trybu AI', 'error');
-      setScanMode('live');
-      return;
-    }
-
-    if (!AIEngine.isReady()) {
-      showAIOverlay(true);
-      updateAIOverlay('Przygotowanie modelu AI...', 0);
-      try {
-        await AIEngine.initialize((info) => {
-          updateAIOverlay(info.message, info.progress);
-        });
-        showAIOverlay(false);
-        updateAIStatusText('Model AI załadowany i gotowy', 'ready');
-      } catch {
-        showAIOverlay(false);
-        toast('Nie udało się załadować modelu AI', 'error');
-        return;
-      }
-    }
-
     const videoEl = $('liveVideo');
+    const overlayEl = $('liveOverlayCanvas');
     const canvas3d = $('live3d');
 
     if (!liveInitialized) {
-      RealtimeScanner.init(videoEl, canvas3d, {
+      RealtimeScanner.init(videoEl, overlayEl, canvas3d, {
         onStats: updateLiveStats,
         onStatus: updateLiveStatus,
       });
@@ -456,7 +435,12 @@
     const pauseIcon = $('liveIconPause');
 
     if (!RealtimeScanner.isScanning()) {
-      RealtimeScanner.startScanning();
+      try {
+        RealtimeScanner.startScanning();
+      } catch (e) {
+        toast('Błąd uruchamiania skanera: ' + e.message, 'error');
+        return;
+      }
       btn.classList.add('active');
       playIcon.classList.add('hidden');
       pauseIcon.classList.remove('hidden');
@@ -628,8 +612,9 @@
 
   function updateLiveStats(stats) {
     $('liveFps').querySelector('span').textContent = `${stats.fps} FPS`;
-    $('livePoints').querySelector('span').textContent = `${stats.points.toLocaleString()} pkt`;
-    $('liveFrames').querySelector('span').textContent = `${stats.frames} klatek`;
+    $('liveEdges').querySelector('span').textContent = `${stats.edges || 0} kraw.`;
+    $('liveCorners').querySelector('span').textContent = `${stats.corners || 0} narożn.`;
+    $('liveVoxels').querySelector('span').textContent = `${(stats.points || 0).toLocaleString()} vox`;
   }
 
   function updateLiveStatus(status) {
